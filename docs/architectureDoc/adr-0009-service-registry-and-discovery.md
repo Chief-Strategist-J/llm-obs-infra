@@ -194,7 +194,96 @@ sequenceDiagram
     Note over Exporter, Traefik: 4. Dynamic Ingress Routing
     Reg->>Exporter: Emit status change event
     Exporter->>Traefik: Write updated discovery.yml
-    Traefik->>App: Proxy traffic to healthy nodes
+```
+
+---
+
+### 2.3 Service Registry Execution Flow (State Management & Health Monitoring)
+
+```
+                       ┌────────────────────────────────────────┐
+                       │       SERVICE REGISTRY FLOW            │
+                       └────────────────────────────────────────┘
+
+Microservice Startup / Background Ping
+    │
+    ├── 1. REGISTER INSTANCE (POST /v1/register)
+    │   ├── Request passes validation checks in router.go (name, host, port, protocol)
+    │   ├── Calls registry.Register(instance) in registry.go:
+    │   │   ├── Generates unique hex instance ID if missing
+    │   │   ├── Sets Status = HEALTHY, RegisteredAt = now, LastHeartbeat = now
+    │   │   ├── Stores in r.instances[serviceName][instanceID] under RWMutex Lock
+    │   │   └── Emits EventRegistered on async worker channel (emitAsync)
+    │   └── Returns 201 Created with ApiResponse<ServiceInstance> envelope
+    │
+    ├── 2. PERIODIC HEARTBEAT PING (POST /v1/heartbeat every 5s)
+    │   ├── Calls registry.Heartbeat(serviceName, instanceID)
+    │   ├── Updates LastHeartbeat = now under RWMutex Lock
+    │   └── Returns 200 OK with ApiResponse<{status: "ok"}> envelope
+    │
+    ├── 3. BACKGROUND LEASE SWEEP (lease_manager.go every 3s)
+    │   ├── Takes RWMutex Snapshot() of all registered instances
+    │   ├── For each instance, calculates elapsed = time.Since(LastHeartbeat):
+    │   │   ├── If elapsed > 15s (HeartbeatTTL) and Status == HEALTHY:
+    │   │   │   └── Updates status to UNHEALTHY ("heartbeat expired") & emits EventStatusChanged
+    │   │   └── If elapsed > 60s (EvictionTTL):
+    │   │       └── Calls EvictInstance() -> Removes node from map & emits EventHeartbeatExpired
+    │   └── Lock released immediately after sweep iteration
+    │
+    └── 4. DURABLE ACTIVE HEALTH PROBING (health_prober.go every 5s)
+        ├── Worker pool fan-out: dispatches jobs to MaxConcurrent worker goroutines
+        ├── Executes active probe based on strategy ("http", "tcp", "exec"):
+        │   ├── HTTP GET /health (timeout 2s)
+        │   ├── TCP Dial host:port (timeout 2s)
+        │   └── Exec shell command execution
+        ├── Applies Flapping Protection Thresholds:
+        │   ├── On Failure: ConsecutiveFails++
+        │   │   └── If ConsecutiveFails >= 3 (FailureThreshold) ➔ Flip status to UNHEALTHY
+        │   └── On Success: ConsecutiveSuccesses++
+        │       └── If ConsecutiveSuccesses >= 2 (SuccessThreshold) ➔ Restore status to HEALTHY
+        └── Updates instance status in registry & emits EventStatusChanged
+```
+
+---
+
+### 2.4 Service Discovery Execution Flow (Resolution, Diagnostics & Traefik Export)
+
+```
+                       ┌────────────────────────────────────────┐
+                       │       SERVICE DISCOVERY FLOW           │
+                       └────────────────────────────────────────┘
+
+Caller Request / Gateway Synchronization
+    │
+    ├── 1. RESOLVE HEALTHY ENDPOINT (GET /v1/resolve?service=name)
+    │   ├── Calls discovery.Resolve(serviceName) in discovery.go
+    │   ├── Queries registry.GetHealthy(serviceName):
+    │   │   ├── [HEALTHY INSTANCES FOUND]
+    │   │   │   └── Returns 200 OK with ApiResponse<{service, endpoint, instances}>
+    │   │   └── [NO HEALTHY INSTANCES AVAILABLE]
+    │   │       ├── Builds Diagnostic Error: lists all registered nodes with last probe errors
+    │   │       └── Returns 503 Service Unavailable with ApiErrorResponse envelope
+    │   └── OpenTelemetry span "discovery.resolve" records resolution duration & attributes
+    │
+    ├── 2. DUAL-RESOLUTION FALLBACK (discovery.ResolveWithFallback)
+    │   ├── Tries dynamic resolution via discovery.Resolve(serviceName)
+    │   ├── If successful ➔ Returns dynamic instance (fallbackUsed = false)
+    │   └── If failed ➔ Returns fallback instance using legacy env host/port (fallbackUsed = true)
+    │
+    ├── 3. TRAEFIK DYNAMIC INGRESS EXPORT (exporter.go)
+    │   ├── Exporter subscribes to registry event channel (Subscribe())
+    │   ├── On event (EventRegistered, EventDeregistered, EventStatusChanged, EventHeartbeatExpired):
+    │   │   ├── Takes snapshot of all HEALTHY instances across all services
+    │   │   ├── Generates Traefik v3 Dynamic Provider YAML structure:
+    │   │   │   ├── http.routers.<service>.rule = "Host(`<service>.llmobs.local`)"
+    │   │   │   └── http.services.<service>.loadBalancer.servers = [{url: "http://host:port"}]
+    │   │   └── Atomic write to /etc/traefik/dynamic/discovery.yml
+    │   └── Traefik file provider reloads routes dynamically in < 200ms
+    │
+    └── 4. REAL-TIME TOPOLOGY STREAMING (GET /v1/watch)
+        ├── Opens Server-Sent Events (SSE) HTTP connection (`text/event-stream`)
+        ├── Filters events by query `?service=name` or streams all topology events
+        └── Flushes SSE event payload `event: STATUS_CHANGED` to client on status update
 ```
 
 ---
@@ -418,25 +507,57 @@ curl -X POST http://llmobs-service-registry:31426/v1/register \
 **Success Response (`201 Created`)**:
 ```json
 {
-  "id": "e9d2a7f1b8c34d5a",
-  "name": "forecast-engine",
-  "host": "forecast-engine-container",
-  "port": 8000,
-  "protocol": "http",
-  "version": "v1.0.0",
-  "weight": 100,
-  "status": 0,
-  "healthCheck": {
+  "success": true,
+  "statusCode": 201,
+  "data": {
+    "id": "e9d2a7f1b8c34d5a",
+    "name": "forecast-engine",
+    "host": "forecast-engine-container",
+    "port": 8000,
     "protocol": "http",
-    "path": "/health",
-    "interval": 5000000000,
-    "timeout": 2000000000
+    "version": "v1.0.0",
+    "weight": 100,
+    "status": 0,
+    "healthCheck": {
+      "protocol": "http",
+      "path": "/health"
+    },
+    "metadata": { "environment": "production", "region": "us-east-1" },
+    "registeredAt": "2026-09-02T12:00:00Z",
+    "lastHeartbeat": "2026-09-02T12:00:00Z"
   },
-  "metadata": { "environment": "production", "region": "us-east-1" },
-  "registeredAt": "2026-09-02T12:00:00Z",
-  "lastHeartbeat": "2026-09-02T12:00:00Z",
-  "consecutiveFails": 0,
-  "consecutiveSuccesses": 0
+  "meta": {
+    "requestId": "req-1700000000000-a1b2c3",
+    "correlationId": "corr-1700000000000-x9y8z7",
+    "causationId": "req-1700000000000-a1b2c3",
+    "timestamp": "2026-09-02T12:00:00.000Z",
+    "executionTimeMs": 8
+  }
+}
+```
+
+**Validation Error Response (`400 Bad Request`)**:
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "One or more payload validation checks failed.",
+    "details": [
+      {
+        "field": "host",
+        "issue": "Field 'host' is required and cannot be empty."
+      }
+    ]
+  },
+  "meta": {
+    "requestId": "req-1700000000000-a1b2c3",
+    "correlationId": "corr-1700000000000-x9y8z7",
+    "causationId": "req-1700000000000-a1b2c3",
+    "timestamp": "2026-09-02T12:00:00.000Z",
+    "executionTimeMs": 2
+  }
 }
 ```
 
@@ -445,6 +566,7 @@ Every 5 seconds, the service pings the registry using the assigned instance ID:
 ```bash
 curl -X POST http://llmobs-service-registry:31426/v1/heartbeat \
   -H "Content-Type: application/json" \
+  -H "x-idempotency-key: idem-hb-1001" \
   -d '{
     "name": "forecast-engine",
     "instanceId": "e9d2a7f1b8c34d5a"
@@ -454,7 +576,18 @@ curl -X POST http://llmobs-service-registry:31426/v1/heartbeat \
 **Success Response (`200 OK`)**:
 ```json
 {
-  "status": "ok"
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "status": "ok"
+  },
+  "meta": {
+    "requestId": "req-1700000000000-hb1",
+    "correlationId": "req-1700000000000-hb1",
+    "causationId": "req-1700000000000-hb1",
+    "timestamp": "2026-09-02T12:00:05.000Z",
+    "executionTimeMs": 1
+  }
 }
 ```
 
@@ -510,27 +643,50 @@ curl -X GET "http://llmobs-service-registry:31426/v1/resolve?service=forecast-en
 **Success Response (`200 OK`)**:
 ```json
 {
-  "service": "forecast-engine",
-  "endpoint": "http://forecast-engine-container:8000",
-  "instances": [
-    {
-      "id": "e9d2a7f1b8c34d5a",
-      "name": "forecast-engine",
-      "host": "forecast-engine-container",
-      "port": 8000,
-      "protocol": "http",
-      "version": "v1.0.0",
-      "weight": 100,
-      "status": 0
-    }
-  ]
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "service": "forecast-engine",
+    "endpoint": "http://forecast-engine-container:8000",
+    "instances": [
+      {
+        "id": "e9d2a7f1b8c34d5a",
+        "name": "forecast-engine",
+        "host": "forecast-engine-container",
+        "port": 8000,
+        "protocol": "http",
+        "version": "v1.0.0",
+        "weight": 100,
+        "status": 0
+      }
+    ]
+  },
+  "meta": {
+    "requestId": "req-1700000000000-res1",
+    "correlationId": "req-1700000000000-res1",
+    "causationId": "req-1700000000000-res1",
+    "timestamp": "2026-09-02T12:00:10.000Z",
+    "executionTimeMs": 3
+  }
 }
 ```
 
 **Error Response when nodes are down (`503 Service Unavailable`)**:
 ```json
 {
-  "error": "all 1 instances of \"forecast-engine\" are unavailable:\n  forecast-engine/e9d2a7f1b8c34d5a (forecast-engine-container:8000) — heartbeat expired"
+  "success": false,
+  "statusCode": 503,
+  "error": {
+    "code": "SERVICE_UNAVAILABLE",
+    "message": "all 1 instances of \"forecast-engine\" are unavailable:\n  forecast-engine/e9d2a7f1b8c34d5a (forecast-engine-container:8000) — heartbeat expired"
+  },
+  "meta": {
+    "requestId": "req-1700000000000-res2",
+    "correlationId": "req-1700000000000-res2",
+    "causationId": "req-1700000000000-res2",
+    "timestamp": "2026-09-02T12:00:15.000Z",
+    "executionTimeMs": 2
+  }
 }
 ```
 
@@ -653,3 +809,37 @@ go test -v ./packages/configs/llm-obs-infra/service-discovery/tests/...
 - [`server/router.go`](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/service-discovery/server/router.go) — Data-driven route table & generic JSON payload decoder.
 - [`traefik/exporter.go`](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/service-discovery/traefik/exporter.go) — Traefik dynamic provider exporter with trace spans.
 - [`tests/health_prober_test.go`](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/service-discovery/tests/health_prober_test.go) — Health prober test suite.
+
+---
+
+## 7. Zero-Downtime Migration Strategy & Rollback Lifecycle
+
+To transition existing microservices (`latency-engine`, `event-cost`, `web-app`, `auth`, `ai-service`) and infrastructure targets (ClickHouse, Kafka, Redis, Traefik) from legacy static environment variable routing (`AI_SERVICE_HOST=ai-service`) to dynamic service discovery without causing production downtime, the platform executes the following 4-phase migration strategy:
+
+```log
+└── Service Discovery Migration Pipeline
+    ├── Phase 1: Static Co-existence & Seed Catalog Bootstrapping
+    │   ├── Deploy `llmobs-service-registry` container sidecar on port 31426
+    │   ├── Seed static infrastructure targets (ClickHouse, Redis, Kafka, Traefik) in `services.json`
+    │   └── Maintain legacy static env vars (`AI_SERVICE_HOST=ai-service`) as primary defaults in microservices
+    │
+    ├── Phase 2: Dual-Resolution & Background Registration
+    │   ├── Microservices start sending `POST /v1/register` & background `POST /v1/heartbeat` pings
+    │   └── Client discovery adapters implement fallback resolution:
+    │       ├── 1. Query registry `GET /v1/resolve?service=ai-service`
+    │       └── 2. On timeout (>50ms) or `503 Service Unavailable`, fall back to static env var (`AI_SERVICE_HOST`)
+    │
+    ├── Phase 3: Dynamic Traefik Ingress Routing Cutover
+    │   ├── Enable Traefik dynamic provider exporter (`traefik/exporter.go` writing `discovery.yml`)
+    │   └── Route external & inter-service domain calls (`*.llmobs.local`) through Traefik ingress
+    │
+    └── Phase 4: Legacy Deprecation & Full Circuit Breaking
+        ├── Deprecate static host/port env variables across service configuration manifests
+        └── Enforce client-side load balancing, circuit breaking, and OpenTelemetry trace propagation
+```
+
+### Rollback Strategy & Emergency Triggers
+
+1. **Immediate Fallback to Legacy Static Routing**: If the service registry becomes unreachable or experiences high latency (>100ms), client SDK adapters immediately fall back to environment variable targets without throwing exceptions.
+2. **Traefik Last-Known-Good Ingress Preservation**: If `llmobs-service-registry` crashes, Traefik retains its last valid `/etc/traefik/dynamic/discovery.yml` configuration in memory, maintaining 100% ingress routing stability.
+
