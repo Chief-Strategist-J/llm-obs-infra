@@ -683,7 +683,46 @@ If the dynamic registry experiences an unexpected regression:
 
 ---
 
-## 15. Final Architecture Board Recommendation
+## 15. Competitive Analysis: LLM Service Discovery vs. HashiCorp Consul
+
+| Dimension | LLM Service Discovery Engine | HashiCorp Consul | Architectural & Business Impact |
+|---|---|---|---|
+| **Binary & Container Size** | **13.7 MB** (Compressed: 5.8 MB) | ~150 MB (Compressed: ~55 MB) | **90% reduction** in container footprint and image transfer times |
+| **Idle Memory Consumption** | **12 MB – 20 MB** RAM | 100 MB – 250 MB RAM | Essential for edge nodes, CI runners, and memory-constrained developer workstations |
+| **Startup & Boot Latency** | **< 50 milliseconds** | 3 – 8 seconds (Raft leader election) | Instant cold starts; zero waiting for cluster quorum in local dev or edge restarts |
+| **Traefik Ingress Integration** | **Direct atomic file reconciler** (`discovery.yml`) | External Catalog API polling or Consul Connect mesh | No catalog polling overhead or complex Consul Connect sidecar proxies required |
+| **Consensus & Clustering** | In-Memory Single-Process with LKG Client Cache | Multi-Node Raft Distributed Consensus | Consul is built for multi-datacenter HA; LLM Service Discovery is optimized for Docker Compose/Edge |
+| **Active Probing Model** | Direct TCP & HTTP socket dials with backoff | Script checks, HTTP, gRPC, Docker exec, TCP | LLM Service Discovery rejects arbitrary `exec` to eliminate RCE vulnerabilities |
+| **Configuration Complexity** | Zero-config / single `services.json` catalog | Multi-file HCL configs, gossip encryption keys, ACL tokens | Developers can boot the entire stack with zero configuration burden |
+| **Operational Overhead** | Zero daemon maintenance | Requires Raft snapshotting, tombstone cleanups, and quorum monitoring | Eliminates distributed systems operational toil in non-Kubernetes environments |
+
+---
+
+## 16. Strategic SWOT Analysis
+
+| Category | Assessment | Strategic Response / Mitigation |
+|---|---|---|
+| **Strengths (S)** | • **Ultra-lightweight**: 13.7 MB Docker image with <20 MB memory footprint.<br/>• **Sub-second cold-starts**: Instant initialization with zero cluster consensus delay.<br/>• **Hardened security**: Banned arbitrary `exec` checks, enforced RFC 1918 CIDR validation.<br/>• **Seamless Traefik integration**: Built-in atomic `discovery.yml` reconciler.<br/>• **Deterministic seed catalog**: Guarantees boot-time readiness for platform databases. | Leverage as the default lightweight control plane across edge deployments, developer environments, and standalone Docker Compose stacks. |
+| **Weaknesses (W)** | • **Single-Process In-Memory State**: Restarting the registry wipes dynamically registered microservices until they renew heartbeat.<br/>• **No Built-in Multi-Node Raft**: Does not natively support multi-datacenter quorum replication.<br/>• **No Native Web GUI**: Monitoring currently relies on REST endpoints (`/v1/services`, `/health`). | • Client-side Last-Known-Good (LKG) caching mitigates cold restarts.<br/>• Native Traefik dashboard visualizes routing state.<br/>• Roadmap v3.5 introduces embedded Web UI. |
+| **Opportunities (O)** | • **Edge & IoT Telemetry Topologies**: Perfect fit for distributed resource-constrained edge gateways where Consul or K8s is too heavy.<br/>• **Embedded DNS Forwarding**: Adding a built-in DNS server (port 53) allows native `*.llmobs.local` resolution for all containers without Traefik.<br/>• **Native OTel Instrumentation**: Emitting registration events and probe latencies directly to OTEL Collector as span waterfalls. | Implement DNS forwarding (v3.4) and OTel span export (v3.6) to position the package as the premier edge discovery daemon. |
+| **Threats (T)** | • **Kubernetes Redundancy**: In K8s environments, native `Service` and `EndpointSlice` primitives render custom registries redundant.<br/>• **Docker DNS Adoption**: Simple deployments might prefer Docker's internal DNS without dynamic weighting or active health probing. | Enforce clear environment boundaries: Registry is scoped strictly to Docker Compose and Edge topologies; bypassed cleanly in Kubernetes. |
+
+---
+
+## 17. Upcoming Feature Roadmap
+
+| Milestone | Feature Name | Description | Target Benefit |
+|---|---|---|---|
+| **v3.2.0** | **gRPC Active Health Probing & mTLS** | Support native gRPC health checking (`grpc.health.v1.Health`) and mutual TLS certificate validation. | Enables secure inter-service probing for gRPC microservices and OTLP collectors. |
+| **v3.3.0** | **Lightweight Raft HA Clustering** | Embed HashiCorp Raft to allow 3-node HA deployment with leader election and state replication. | High-availability active-passive failover for enterprise bare-metal clusters without Consul. |
+| **v3.4.0** | **Embedded DNS Server (:53)** | Built-in lightweight DNS resolver responding to `A` and `SRV` queries for registered instances. | Containers can resolve `curl http://clickhouse.llmobs.local:8123` natively via Docker DNS forwarder. |
+| **v3.5.0** | **Embedded Web Status Dashboard** | Lightweight HTML5/WebSockets admin portal on `:31426/ui` displaying real-time instance health and latency. | Instant operational visibility into cluster topology without opening CLI or querying raw JSON. |
+| **v3.6.0** | **OTLP Trace Waterfall Export** | Native OpenTelemetry trace exporter pushing probe latencies and lease expirations to `llmobs-tempo`. | End-to-end visibility into service flapping and network degraded states in Grafana. |
+| **v3.7.0** | **Dynamic Canary & Traffic Weight Splitting**| Real-time HTTP API to adjust service instance weights (`0–100`) dynamically synced into Traefik. | Enables zero-downtime blue-green and canary deployments across microservices. |
+
+---
+
+## 18. Final Architecture Board Recommendation
 
 > [!IMPORTANT]
 > **FINAL RECOMMENDATION: ACCEPT WITH CONDITIONS**
