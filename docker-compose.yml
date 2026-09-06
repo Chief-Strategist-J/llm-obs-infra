@@ -337,9 +337,6 @@ services:
 
   llmobs-service-registry:
     image: chiefj/llmobs-service-registry:latest
-    build:
-      context: ./service-discovery
-      dockerfile: Dockerfile
     container_name: llmobs-service-registry
     restart: always
     logging: *default-logging
