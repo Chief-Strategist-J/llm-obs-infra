@@ -336,11 +336,12 @@ services:
 
 
   llmobs-service-registry:
+    image: chiefj/llmobs-service-registry:latest
     build:
       context: ./service-discovery
       dockerfile: Dockerfile
     container_name: llmobs-service-registry
-    restart: unless-stopped
+    restart: always
     logging: *default-logging
     ports:
       - "${PORT_SERVICE_REGISTRY:-31426}:31426"
