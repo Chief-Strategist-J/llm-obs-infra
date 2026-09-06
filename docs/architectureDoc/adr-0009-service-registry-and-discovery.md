@@ -5,9 +5,10 @@
 | **Document ID** | ADR-0009 |
 | **Status** | Accepted with Conditions |
 | **Author(s)** | Principal Distributed Systems Architect & Architecture Review Board |
-| **Target Package** | [`packages/configs/llm-obs-infra/service-discovery`](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/service-discovery) |
-| **Date** | 2026-09-02 |
-| **Version** | 3.0.0 (Production-Defensible Lean Architecture) |
+| **Target Repository** | [`Chief-Strategist-J/llm-service-discovery`](https://github.com/Chief-Strategist-J/llm-service-discovery) (Submodule: `service-discovery`) |
+| **Docker Distribution** | `docker.io/chiefj/llmobs-service-registry:latest` |
+| **Date** | 2026-09-06 |
+| **Version** | 3.1.0 (Decoupled Micro-Repo & OCI Distributed Architecture) |
 
 ---
 
@@ -84,49 +85,173 @@ ADR-0009 is **Accepted with Conditions** under a strictly reduced, production-ha
 
 ---
 
-## 4. High-Level Design (HLD)
+## 4. Architectural Design: HLD, LLD & Database Specifications
 
-### 4.1 System Topology & Traffic Separation (Docker Compose & Edge)
+### 4.1 High-Level Design (HLD) System Topology
+
+The service discovery architecture bridges ingestion microservices, asynchronous daemon workers, and data plane databases with the Traefik v3 reverse proxy:
 
 ```mermaid
-graph TD
-    Client["Client / External Traffic"] --> Traefik["Traefik v3 Gateway (:80/:443)"]
-
-    subgraph Control_Plane["Service Discovery Control Plane (:31426)"]
-        Server["HTTP API Server (Minimal REST)"]
-        AuthValidator["Auth & CIDR Security Validator"]
-        RegistryEngine["Thread-Safe In-Memory Registry"]
-        LeaseMgr["Lease Sweeper (Heartbeat TTL)"]
-        ActiveProber["Active Prober (HTTP/TCP Only)"]
-        Reconciler["Traefik Desired-State Reconciler"]
-
-        Server --> AuthValidator
-        AuthValidator --> RegistryEngine
-        LeaseMgr --> RegistryEngine
-        ActiveProber --> RegistryEngine
-        RegistryEngine --> Reconciler
+flowchart TD
+    subgraph Clients["1. CLIENT & INGESTION LAYER"]
+        FastAPI["FastAPI Ingestion SDK (:8000)"]
+        NextJS["Next.js Web Portal (:31400)"]
+        Workers["Async Consumer Workers (Cost, NLI, Quality)"]
     end
 
-    subgraph Data_Plane["Application Data Plane"]
-        PyService["Python Engine (latency-engine)"]
-        NodeService["Node.js Web App (web-app)"]
-        GoService["Go AI Service (ai-service)"]
-        InfraDB[("ClickHouse / Redis / Kafka")]
+    subgraph GatewayPlane["2. INGRESS & TRAFFIC MANAGEMENT PLANE"]
+        Traefik["Traefik v3 Ingress Gateway (:31410 / :31419)<br/>Reverse Proxy, TLS Termination & Edge Load Balancer"]
+        DynamicConfig[("discovery.yml<br/>Dynamic File Provider")]
     end
 
-    Reconciler -->|"Atomic File Write (discovery.yml)"| DynFile["Traefik Dynamic Config"]
-    DynFile -.->|"Inotify Watch"| Traefik
+    subgraph ControlPlane["3. SERVICE DISCOVERY CONTROL PLANE (:31426)"]
+        RegistryEngine["llmobs-service-registry (Go Engine)<br/>In-Memory Dual-State Engine"]
+        SeedCatalog[("Seed Catalog File<br/>config/service-registry/services.json")]
+        TraefikExporter["Atomic File Exporter<br/>(Periodic State Reconciler)"]
+    end
 
-    Traefik -->|"Proxy Traffic (Authoritative LB)"| PyService
-    Traefik -->|"Proxy Traffic (Authoritative LB)"| NodeService
-    Traefik -->|"Proxy Traffic (Authoritative LB)"| GoService
+    subgraph DatabasePlane["4. CORE PLATFORM STORAGE & MESSAGING PLANE"]
+        AlloyDB[("Google AlloyDB Omni 15 (:31420)<br/>Relational & Transactional DB")]
+        ClickHouse[("ClickHouse v24.8 (:8123)<br/>Columnar Telemetry Analytics")]
+        RedisStore[("Redis v7 (:31413)<br/>Micro-USD Spend Ledger")]
+        KafkaBus[("Apache Kafka KRaft (:31414)<br/>Streaming Message Bus")]
+        TempoTrace[("Grafana Tempo (:31416)<br/>Distributed Trace Waterfalls")]
+        OtelCol[("OTEL Collector (:31417)<br/>Telemetry Enrichment Pipeline")]
+    end
 
-    PyService -->|"1. Register & Heartbeat"| Server
-    NodeService -->|"1. Register & Heartbeat"| Server
-    GoService -->|"1. Register & Heartbeat"| Server
+    %% Registrations & Probing
+    SeedCatalog -->|Bootstrap Seeds| RegistryEngine
+    FastAPI -->|POST /v1/register & /v1/heartbeat| RegistryEngine
+    Workers -->|GET /v1/resolve?service={name}| RegistryEngine
+    
+    RegistryEngine -->|Active TCP Probes (5s)| AlloyDB
+    RegistryEngine -->|Active HTTP Probes /ping (5s)| ClickHouse
+    RegistryEngine -->|Active TCP Probes (5s)| RedisStore
+    RegistryEngine -->|Active TCP Probes (5s)| KafkaBus
 
-    ActiveProber -->|"TCP Health Probe"| InfraDB
-    ActiveProber -->|"HTTP Health Probe (Optional)"| PyService
+    %% Traefik Reconciliation
+    RegistryEngine --> TraefikExporter
+    TraefikExporter -->|Atomic Tempfile + Rename| DynamicConfig
+    DynamicConfig -.->|Inotify Dynamic Reload| Traefik
+
+    %% Traffic Routing
+    NextJS -->|Traverse Ingress| Traefik
+    Traefik -->|Route Verified Requests| ClickHouse
+    Traefik -->|Route Verified Requests| TempoTrace
+    Traefik -->|Route Verified Requests| OtelCol
+```
+
+---
+
+### 4.2 Low-Level Design (LLD) Component Architecture
+
+The service registry engine is written in pure Go without heavyweight external frameworks, running as an unprivileged, non-root microservice container:
+
+```mermaid
+flowchart LR
+    subgraph IngressAPI["REST Request Ingress"]
+        R_Reg["POST /v1/register"]
+        R_HB["POST /v1/heartbeat"]
+        R_List["GET /v1/services"]
+        R_Res["GET /v1/resolve"]
+        R_Health["GET /health"]
+    end
+
+    subgraph RequestPipeline["Request Interceptor Pipeline"]
+        TraceMW["TraceContextMiddleware<br/>(W3C traceparent extraction)"]
+        AuthVal["Security & CIDR Validator<br/>(HMAC Bearer & RFC 1918 Private Subnets)"]
+        EnvelopeOut["Envelope Response Formatter<br/>(Consistent REST API Schema)"]
+    end
+
+    subgraph CoreEngine["In-Memory Concurrent State Engine"]
+        RWMutex["sync.RWMutex Lock"]
+        StateStore[("map[ServiceName]map[InstanceID]*ServiceInstance")]
+    end
+
+    subgraph AsyncDaemons["Concurrent Background Goroutines"]
+        LeaseSweeper["Lease Sweeper (3s Ticker)<br/>Checks Heartbeat TTL (15s)"]
+        ActiveProber["Active Prober (5s Ticker)<br/>TCP socket & HTTP GET /ping dials"]
+        TraefikReconciler["Traefik Reconciler (5s Ticker)<br/>Atomic write to discovery.yml"]
+    end
+
+    subgraph ExternalTargets["External Probing Targets"]
+        DB_Alloy["AlloyDB Omni (TCP :5432)"]
+        DB_Click["ClickHouse (HTTP :8123/ping)"]
+        DB_Redis["Redis (TCP :6379)"]
+        DB_Kafka["Kafka (TCP :9092)"]
+    end
+
+    IngressAPI --> TraceMW
+    TraceMW --> AuthVal
+    AuthVal --> RWMutex
+    RWMutex --> StateStore
+    StateStore --> EnvelopeOut
+
+    StateStore <--> LeaseSweeper
+    StateStore <--> ActiveProber
+    StateStore --> TraefikReconciler
+
+    ActiveProber --> DB_Alloy
+    ActiveProber --> DB_Click
+    ActiveProber --> DB_Redis
+    ActiveProber --> DB_Kafka
+```
+
+---
+
+### 4.3 Database & Storage Architecture
+
+#### A. In-Memory Concurrent Store Schema
+The registry utilizes an in-memory indexed hash store keyed by `ServiceName` and `InstanceID`. Every instance is represented by the following structured schema:
+
+```go
+type ServiceInstance struct {
+    ID                   string             `json:"id"`                   // Hex hash (service:host:port)
+    Name                 string             `json:"name"`                 // Service name identifier
+    Host                 string             `json:"host"`                 // Docker container or edge IP
+    Port                 int                `json:"port"`                 // Host/Container port
+    Protocol             string             `json:"protocol"`             // "http", "https", "tcp"
+    Weight               int                `json:"weight"`               // Traffic weight (1-100)
+    Status               ServiceStatus      `json:"status"`               // 0=UNKNOWN, 1=PASSING, 2=CRITICAL
+    HealthCheck          HealthCheckConfig  `json:"healthCheck"`          // Probe configuration
+    Metadata             map[string]string  `json:"metadata"`             // Tags and attributes
+    RegisteredAt         time.Time          `json:"registeredAt"`         // Registration timestamp
+    LastHeartbeat        time.Time          `json:"lastHeartbeat"`        // Keepalive heartbeat
+    LastProbeAt          time.Time          `json:"lastProbeAt"`          // Last active check
+    LastProbeErr         string             `json:"lastProbeErr"`         // Socket or HTTP error message
+    ConsecutiveFails     int                `json:"consecutiveFails"`     // Consecutive failed attempts
+    ConsecutiveSuccesses int                `json:"consecutiveSuccesses"` // Consecutive passing attempts
+}
+```
+
+#### B. Seed Catalog Relational Mapping (`config/service-registry/services.json`)
+The registry bootstraps static platform storage services upon container boot. This eliminates cold-start dependency race conditions across the stack:
+
+| Seed Service | Hostname | Port | Protocol | Probe Path / Type | Connected Storage Role |
+|---|---|---|---|---|---|
+| `alloydb` | `llmobs-alloydb` | `5432` | `tcp` | TCP Socket Connect | Transactional metadata store (Google AlloyDB Omni 15) |
+| `clickhouse` | `llmobs-clickhouse` | `8123` | `http` | `GET /ping` | Columnar span & log analytics (ClickHouse 24.8) |
+| `redis` | `llmobs-redis` | `6379` | `tcp` | TCP Socket Connect | Micro-USD financial spend ledger & API key cache |
+| `kafka` | `llmobs-kafka` | `9092` | `tcp` | TCP Socket Connect | Telemetry event streaming bus (KRaft) |
+| `tempo` | `llmobs-tempo` | `3200` | `http` | `GET /ready` | Distributed trace waterfall store |
+| `otel-collector` | `llmobs-otel-collector` | `4318` | `http` | `GET /` | OpenTelemetry OTLP ingestion pipeline |
+| `grafana` | `llmobs-grafana` | `3000` | `http` | `GET /api/health`| Unified observability portal |
+
+#### C. Dynamic Traefik Provider Schema (`discovery.yml`)
+The engine exports healthy services (`status == PASSING`) into an atomic Traefik dynamic provider configuration:
+
+```yaml
+http:
+  routers:
+    clickhouse-router:
+      rule: "Host(`clickhouse.llmobs.local`)"
+      service: "clickhouse-service"
+      entryPoints: ["websecure"]
+  services:
+    clickhouse-service:
+      loadBalancer:
+        servers:
+          - url: "http://llmobs-clickhouse:8123"
 ```
 
 ---

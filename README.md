@@ -164,9 +164,12 @@ flowchart TD
 
 ### 9. Service Registry & Discovery Engine (`llmobs-service-registry`)
 - **Technology**: Go High-Performance Micro-Registry Engine
+- **Dedicated Repository**: [`Chief-Strategist-J/llm-service-discovery`](https://github.com/Chief-Strategist-J/llm-service-discovery) (Submodule: `service-discovery`)
+- **Container Image**: `chiefj/llmobs-service-registry:latest` (Docker Hub)
 - **Host Binding**: `31426:31426`
-- **Endpoints**: `GET /v1/services` (List all), `GET /v1/resolve` (Load balancer resolution), `POST /v1/register` (Dynamic registration), `POST /v1/heartbeat`.
+- **Endpoints**: `GET /health`, `GET /v1/services` (List all), `GET /v1/resolve` (Target resolution), `POST /v1/register` (Dynamic registration), `POST /v1/heartbeat`.
 - **Seed Catalog**: Automatically loads 9 core infrastructure seed services on container startup from `config/service-registry/services.json`.
+- **Ingress Integration**: Reconciles cluster health into atomic `/etc/traefik/dynamic/discovery.yml` for Traefik v3.
 
 ---
 
