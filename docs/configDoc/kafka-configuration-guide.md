@@ -898,16 +898,16 @@ graph TD
 graph TB
     subgraph ConsumerPollExecution ["Consumer Thread Execution Loop"]
         PollStart["consumer.poll(Duration.ofMillis(100))"] --> CheckQueue{"CompletedFetch Queue Empty?"}
-        CheckQueue -- Yes --> Fetcher["Fetcher Thread sends FetchRequest"]
-        CheckQueue -- No --> ConsumerRecords["Return ConsumerRecords Batch"]
+        CheckQueue -->|Yes| Fetcher["Fetcher Thread sends FetchRequest"]
+        CheckQueue -->|No| ConsumerRecords["Return ConsumerRecords Batch"]
 
         Fetcher -->|Zero-Copy TCP Read| BrokerStorage["Broker OS Page Cache"]
         BrokerStorage --> CompletedQueue["CompletedFetch Queue"]
 
         ConsumerRecords --> AppProcess["Process Batch (e.g. Ingest Records)"]
         AppProcess --> CommitCheck{"enable.auto.commit = false?"}
-        CommitCheck -- Yes --> ManualCommit["commitSync() / commitAsync()"]
-        CommitCheck -- No --> AutoCommit["Auto Commit (every 5000ms)"]
+        CommitCheck -->|Yes| ManualCommit["commitSync() / commitAsync()"]
+        CommitCheck -->|No| AutoCommit["Auto Commit (every 5000ms)"]
         ManualCommit --> OffsetWrite["Write to __consumer_offsets"]
         AutoCommit --> OffsetWrite
     end
@@ -1021,11 +1021,11 @@ print(f"Key 'trace_101' maps to Partition: {calculate_kafka_partition(b'trace_10
 graph TD
     subgraph PartitionerEngine ["Kafka Partitioner Architecture"]
         Record["ProducerRecord (Key, Value)"] --> CheckKey{"Record Key Provided?"}
-        CheckKey -- Yes --> MurmurHash["MurmurHash2 Algorithm (to32Bits)"]
+        CheckKey -->|Yes| MurmurHash["MurmurHash2 Algorithm (to32Bits)"]
         MurmurHash --> ModuloOp["(hash & 0x7fffffff) % num_partitions"]
         ModuloOp --> TargetPartition["Target Partition ID"]
 
-        CheckKey -- No --> StickyPartitioner["Sticky Partitioner (Batch Pool)"]
+        CheckKey -->|No| StickyPartitioner["Sticky Partitioner (Batch Pool)"]
         StickyPartitioner --> CurrentBatchPartition["Active Batch Partition"]
     end
 
@@ -1045,9 +1045,9 @@ graph TD
 ```mermaid
 graph TB
     subgraph PartitionHotspotting ["Partition Hashing & Skew Mechanics"]
-        Key1["Key: 'trace_101'"] --> H1["Hash: 41208571"] --> P0["Partition 0 (33% Load)"]
-        Key2["Key: 'trace_102'"] --> H2["Hash: 89012444"] --> P1["Partition 1 (33% Load)"]
-        Key3["Key: 'trace_103'"] --> H3["Hash: 12048912"] --> P2["Partition 2 (33% Load)"]
+        Key1["Key: trace_101"] --> H1["Hash: 41208571"] --> P0["Partition 0 (33% Load)"]
+        Key2["Key: trace_102"] --> H2["Hash: 89012444"] --> P1["Partition 1 (33% Load)"]
+        Key3["Key: trace_103"] --> H3["Hash: 12048912"] --> P2["Partition 2 (33% Load)"]
         NullKey["Key: None"] --> Sticky["Sticky Batcher"] --> P0
     end
 
@@ -1196,6 +1196,46 @@ graph TD
     linkStyle 0,1,2,3,4,5 stroke:#c084fc,stroke-width:2px;
 ```
 
+#### Group Coordinator Protocol State Machine (LLD)
+
+```mermaid
+graph TB
+    subgraph RebalanceStateMachine ["Group Coordinator LLD Protocol Execution & Static Membership"]
+        ClientInit["Consumer Container Start"] --> JoinReq["Send JoinGroup Request (with group.instance.id)"]
+        JoinReq --> CoordEval{"Group Coordinator Check"}
+
+        CoordEval -->|Dynamic Member| DynamicJoin["Generate Dynamic Member ID"]
+        CoordEval -->|Static Member| StaticJoin["Lookup Registered group.instance.id"]
+
+        DynamicJoin --> TriggerFullRebalance["Trigger Group Rebalance (PREPARING_REBALANCE)"]
+        StaticJoin --> CheckSession{"Rejoin within session.timeout.ms (45s)?"}
+
+        CheckSession -->|Yes| BypassRebalance["Bypass Rebalance - Retain Partition Assignment"]
+        CheckSession -->|No| EvictStatic["Evict Static Member & Revoke Partitions"]
+        EvictStatic --> TriggerFullRebalance
+
+        TriggerFullRebalance --> LeaderAssign["Group Leader Computes Cooperative Assignment"]
+        LeaderAssign --> SyncReq["Send SyncGroup Request"]
+        BypassRebalance --> SyncReq
+        SyncReq --> ActiveLoop["Transition to STABLE - Resume Fetch Loop & Heartbeat"]
+    end
+
+    style ClientInit fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style JoinReq fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style CoordEval fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style DynamicJoin fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style StaticJoin fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style TriggerFullRebalance fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style CheckSession fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style BypassRebalance fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style EvictStatic fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style LeaderAssign fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style SyncReq fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style ActiveLoop fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11 stroke:#c084fc,stroke-width:2px;
+```
+
 ---
 
 ## 7. Topic Segment Lifecycle & Physical Storage Management
@@ -1227,7 +1267,7 @@ admin.create_topics([topic_spec])
 ```mermaid
 graph TD
     subgraph LogicalTopic ["Logical Telemetry Topic (llmobs-spans)"]
-        direction TB
+
         P0["Partition 0 (Broker 1 Leader)"]
         P1["Partition 1 (Broker 2 Leader)"]
         P2["Partition 2 (Broker 3 Leader)"]
@@ -1259,21 +1299,22 @@ graph TB
         WriteOp["Produce Record Appended"] --> ActiveSegment["Active Segment: 00000000000000000200.log (Currently Appending Write)"]
 
         ActiveSegment --> RollCondition{"Segment Full 100MB or Time Expired 2h?"}
-        RollCondition -- Yes --> CloseSegment["Close Active Segment -> Mark INACTIVE"]
+        RollCondition -->|Yes| CloseSegment["Close Active Segment - Mark INACTIVE"]
         CloseSegment --> OpenNew["Open New Active Segment (.log)"]
-        RollCondition -- No --> KeepWriting["Continue Appending Writes"]
+        RollCondition -->|No| KeepWriting["Continue Appending Writes"]
 
         subgraph IndexLookups ["Offset and Time Index Files"]
             OffsetIndex["00000000000000000000.index (Maps Offset to Physical Byte Position)"]
             TimeIndex["00000000000000000000.timeindex (Maps Timestamp to Offset)"]
         end
 
-        CloseSegment --> IndexLookups
+        CloseSegment --> OffsetIndex
+        CloseSegment --> TimeIndex
 
         subgraph LogRetentionCleaner ["Log Retention Cleaner Thread"]
             CleanerScan["Retention Scan (Every 60 Seconds)"] --> RetentionCheck{"Closed Segment Age Exceeds 24 Hours?"}
-            RetentionCheck -- Yes --> UnlinkFile["Unlink and Delete Segment Files"]
-            RetentionCheck -- No --> RetainSegment["Retain File on Disk"]
+            RetentionCheck -->|Yes| UnlinkFile["Unlink and Delete Segment Files"]
+            RetentionCheck -->|No| RetainSegment["Retain File on Disk"]
         end
 
         CloseSegment --> CleanerScan
@@ -1292,7 +1333,7 @@ graph TB
     style UnlinkFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style RetainSegment fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 
-    linkStyle 0,1,2,3,4,5,6,7,8,9 stroke:#34d399,stroke-width:2px;
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -1367,17 +1408,17 @@ eos_consumer = Consumer({
 
 ---
 
-### 8.2 Idempotent Producer Mechanics (`enable.idempotence=true`)
+### 8.2 Idempotent Producer Mechanics (HLD)
 
 ```mermaid
 graph TD
     subgraph IdempotentProtocol ["Idempotent Producer Protocol"]
-        P1["Producer Client (enable.idempotence=true)"] -->|1. Allocate Producer ID (PID)| B1["Broker Sequence Tracker"]
-        P1 -->|2. Send Record Batch (PID: 101, Seq: 0)| B1
-        B1 -->|3. Persist Batch Seq 0| S1["Partition Log"]
-        B1 -.->|4. Network ACK Drops / Times Out| P1
-        P1 -->|5. Retry Batch (PID: 101, Seq: 0)| B1
-        B1 -->|6. Detect Duplicate Seq 0| D1["Discard Duplicate Payload & Re-ACK"]
+        P1["Producer Client (enable.idempotence=true)"] -->|"1. Allocate Producer ID - PID"| B1["Broker Sequence Tracker"]
+        P1 -->|"2. Send Record Batch - PID 101 Seq 0"| B1
+        B1 -->|"3. Persist Batch Seq 0"| S1["Partition Log"]
+        B1 -.->|"4. Network ACK Drops or Times Out"| P1
+        P1 -->|"5. Retry Batch - PID 101 Seq 0"| B1
+        B1 -->|"6. Detect Duplicate Seq 0"| D1["Discard Duplicate Payload & Re-ACK"]
     end
 
     style P1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -1391,7 +1432,38 @@ graph TD
 
 ---
 
-### 8.3 EOS Configuration Breakdown
+### 8.3 Two-Phase Commit Transaction Coordinator Execution Flow (LLD)
+
+```mermaid
+graph TB
+    subgraph TransactionCoordinatorLLD ["Transactional 2PC State Machine LLD"]
+        TxInit["tx_producer.init_transactions()"] --> FindCoord["Locate Transaction Coordinator"]
+        FindCoord --> BeginTx["tx_producer.begin_transaction()"]
+        BeginTx --> SendData["Produce Records to Partitions"]
+
+        SendData --> CommitReq["tx_producer.commit_transaction()"]
+        CommitReq --> WritePrepare["Write PREPARE_COMMIT to __transaction_state"]
+        WritePrepare --> WriteMarkers["Write COMMIT Control Markers to Partitions"]
+        WriteMarkers --> WriteComplete["Write COMPLETE_COMMIT to __transaction_state"]
+        WriteComplete --> TransactionDone["Transaction Complete"]
+    end
+
+    style TxInit fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style FindCoord fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style BeginTx fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style SendData fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style CommitReq fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style WritePrepare fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style WriteMarkers fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style WriteComplete fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TransactionDone fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7 stroke:#38bdf8,stroke-width:2px;
+```
+
+---
+
+### 8.4 EOS Configuration Breakdown
 
 1. **Parameter**: `enable.idempotence`
    - **Definition**: Ensures that the broker processes exactly one copy of a message batch sent by a producer, even if the producer retries due to network timeouts.
@@ -1445,17 +1517,17 @@ graph LR
     end
 
     subgraph LogCompactionCleaner ["Log Compaction Cleaner"]
-        CleanerThread["Cleaner Thread"]
+        CleanerThread["Log Cleaner Deduplication Thread"]
     end
 
-    BeforeCompaction --> CleanerThread
+    K2_V2 -->|Deduplicate Keys| CleanerThread
 
     subgraph AfterCompaction ["After Compaction"]
         K1_V2_Post["Key: K1, Val: V2 (Seq 3)"]
         K2_V2_Post["Key: K2, Val: V2 (Seq 4)"]
     end
 
-    CleanerThread --> AfterCompaction
+    CleanerThread -->|Write Compacted Segment| K1_V2_Post
 
     style K1_V1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style K2_V1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
@@ -1470,7 +1542,33 @@ graph LR
 
 ---
 
-### 9.3 Compaction Configuration Breakdown
+### 9.3 Log Compaction Cleaner Thread Execution Flow (LLD)
+
+```mermaid
+graph TB
+    subgraph LogCleanerLLD ["Log Cleaner Thread Low-Level Execution"]
+        ScanTrigger["Cleaner Trigger (dirty ratio >= 0.5)"] --> BuildMap["Build In-Memory Skimpy Offset Map"]
+        BuildMap --> ScanDirty["Scan Dirty Log Segments"]
+        ScanDirty --> DedupeKeys["Keep Highest Offset Per Message Key"]
+        DedupeKeys --> WriteClean["Write Compacted Records to Clean Segment"]
+        WriteClean --> SwapSegments["Atomic File Swap -> Replace Dirty Segment"]
+        SwapSegments --> PurgeTombstones["Purge Expired Tombstones (delete.retention.ms)"]
+    end
+
+    style ScanTrigger fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style BuildMap fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ScanDirty fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style DedupeKeys fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style WriteClean fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style SwapSegments fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style PurgeTombstones fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5 stroke:#f0abfc,stroke-width:2px;
+```
+
+---
+
+### 9.4 Compaction Configuration Breakdown
 
 1. **Parameter**: `cleanup.policy`
    - **Definition**: `delete` purges closed segments based on time/size. `compact` retains the latest record value per message key forever. `compact,delete` compacts by key and enforces time-based expiration.
@@ -1587,9 +1685,8 @@ cluster_producer = Producer({
 ### 11.2 Multi-Broker KRaft Cluster Architecture Design (HLD)
 
 ```mermaid
-graph TB
+graph LR
     subgraph MultiBrokerCluster ["Multi-Broker KRaft Cluster Architecture"]
-        direction LR
         B1["Kafka Broker 1 (Node ID 1) - Heap: 2048M"]
         B2["Kafka Broker 2 (Node ID 2) - Heap: 2048M"]
         B3["Kafka Broker 3 (Node ID 3) - Heap: 2048M"]
@@ -1604,4 +1701,38 @@ graph TB
     style B3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 
     linkStyle 0,1,2 stroke:#34d399,stroke-width:2px;
+```
+
+---
+
+### 11.3 KRaft Consensus Leader & Partition Replication Protocol (LLD)
+
+```mermaid
+graph TB
+    subgraph KRaftReplicationLLD ["KRaft Leader Election & Quorum Sync LLD"]
+        Controller1["Broker 1 (Active Controller Leader)"] -->|Publish Metadata Record| MetadataLog["@metadata Partition Log"]
+        MetadataLog -->|Replicate Metadata Record| Controller2["Broker 2 (Controller Follower)"]
+        MetadataLog -->|Replicate Metadata Record| Controller3["Broker 3 (Controller Follower)"]
+
+        subgraph PartitionReplication ["Data Partition Leader & ISR Sync"]
+            P_Leader["Partition 0 Leader (Broker 1)"] -->|Fetch Replica Request| P_Follower2["Partition 0 Replica (Broker 2)"]
+            P_Leader -->|Fetch Replica Request| P_Follower3["Partition 0 Replica (Broker 3)"]
+            P_Follower2 -->|Update LEO in Leader| ISR_Quorum["In-Sync Replicas (ISR Pool)"]
+            P_Follower3 -->|Update LEO in Leader| ISR_Quorum
+            ISR_Quorum --> AdvanceHW["Advance High Watermark (HW)"]
+        end
+    end
+
+    style Controller1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style MetadataLog fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Controller2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Controller3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+
+    style P_Leader fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P_Follower2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P_Follower3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ISR_Quorum fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style AdvanceHW fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7 stroke:#34d399,stroke-width:2px;
 ```
