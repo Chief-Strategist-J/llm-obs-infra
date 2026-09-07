@@ -156,6 +156,96 @@ To avoid scrolling back and forth between sections, this master reference provid
 
 ---
 
+16. **Parameter**: `min.insync.replicas`
+    - **Definition**: Minimum number of in-sync replicas (ISR) that must acknowledge a produce request when `acks=all`.
+    - **Expected Values**: Dev: `1` | Multi-Broker Production: `2` | High-Availability Cluster: `2` (out of 3 replicas)
+    - **Currently Configured Value**: `1` (Dev) / `2` (Prod)
+    - **Outcome / System Impact**: Prevents data loss during broker crashes by enforcing minimum write durability quorum.
+    - **Why & When to Configure It**: If a leader broker fails, having `min.insync.replicas=2` guarantees at least one replica has identical committed data.
+    - **Scaling & Troubleshooting**: If active ISR count falls below `min.insync.replicas`, producers with `acks=all` receive `NotEnoughReplicasException`.
+
+---
+
+17. **Parameter**: `compression.type`
+    - **Definition**: Specifies record batch compression algorithm (`none`, `gzip`, `snappy`, `lz4`, `zstd`).
+    - **Expected Values**: High-CPU Ingest: `lz4` or `snappy` | High-Ratio Storage: `zstd` | Legacy: `gzip`
+    - **Currently Configured Value**: `lz4` (Producer) / `producer` (Broker Inherit)
+    - **Outcome / System Impact**: Reduces network bandwidth usage and disk storage footprint by 3x–7x with minimal CPU overhead.
+    - **Why & When to Configure It**: Batching telemetry records into `lz4` compresses text JSON logs and trace spans extremely efficiently.
+    - **Scaling & Troubleshooting**: `lz4` provides optimal CPU-to-compression speed ratio for streaming telemetry.
+
+---
+
+18. **Parameter**: `max.in.flight.requests.per.connection`
+    - **Definition**: Maximum number of unacknowledged produce requests the producer client sends on a single TCP connection before blocking.
+    - **Expected Values**: Strict Message Ordering + Idempotency: `5` (or `1`) | Non-Idempotent Strict Order: `1`
+    - **Currently Configured Value**: `5`
+    - **Outcome / System Impact**: Maximizes network pipeline throughput while ensuring message ordering when `enable.idempotence=true`.
+    - **Why & When to Configure It**: Setting higher than 1 on non-idempotent producers risks message reordering if retries occur.
+    - **Scaling & Troubleshooting**: Always set `<= 5` when `enable.idempotence=true` to maintain strict partition sequence guarantees.
+
+---
+
+19. **Parameter**: `fetch.min.bytes` & `fetch.max.wait.ms`
+    - **Definition**: `fetch.min.bytes` sets minimum data bytes broker should return for a fetch request. `fetch.max.wait.ms` sets max time broker waits to accumulate `fetch.min.bytes`.
+    - **Expected Values**: Low-Latency: `fetch.min.bytes=1`, `fetch.max.wait.ms=500` | High-Throughput DB Sink: `fetch.min.bytes=1048576` (1 MB), `fetch.max.wait.ms=500`
+    - **Currently Configured Value**: `fetch.min.bytes=1048576` (1 MB) | `fetch.max.wait.ms=500` ms
+    - **Outcome / System Impact**: Reduces consumer CPU poll loop iterations and broker network I/O calls by 10x.
+    - **Why & When to Configure It**: Stops consumer from executing empty poll loops on low-throughput topics.
+    - **Scaling & Troubleshooting**: Increase `fetch.min.bytes` to 1MB or 4MB in batch analytics consumers like ClickHouse ingest.
+
+---
+
+20. **Parameter**: `session.timeout.ms` & `heartbeat.interval.ms`
+    - **Definition**: `session.timeout.ms` sets max time group coordinator waits for heartbeats before evicting consumer. `heartbeat.interval.ms` sets frequency of background heartbeat thread.
+    - **Expected Values**: Production Ingest: `session.timeout.ms=45000` (45s), `heartbeat.interval.ms=3000` (3s) | Aggressive Eviction: `session.timeout.ms=10000` (10s), `heartbeat.interval.ms=3000`
+    - **Currently Configured Value**: `session.timeout.ms=45000` | `heartbeat.interval.ms=3000`
+    - **Outcome / System Impact**: Eliminates false consumer group rebalances caused by transient network GC pauses.
+    - **Why & When to Configure It**: Rule of thumb: `heartbeat.interval.ms` must be `<= 1/3` of `session.timeout.ms`.
+    - **Scaling & Troubleshooting**: Increase `session.timeout.ms` to 45s in containerized cloud environments with transient network latency.
+
+---
+
+21. **Parameter**: `num.network.threads` & `num.io.threads`
+    - **Definition**: `num.network.threads` sets NIO network acceptor/response threads. `num.io.threads` sets disk read/write request handler threads.
+    - **Expected Values**: Base Dev (4 Core): `num.network.threads=3`, `num.io.threads=4` | High-Core Prod (16 Core): `num.network.threads=8`, `num.io.threads=16`
+    - **Currently Configured Value**: `num.network.threads=3` | `num.io.threads=4` (in `server.properties`)
+    - **Outcome / System Impact**: Prevents request queue contention under high concurrent client connection counts.
+    - **Why & When to Configure It**: `num.io.threads` should equal physical CPU core count or disk drive count; `num.network.threads` should equal 50% CPU core count.
+    - **Scaling & Troubleshooting**: Monitor JMX metric `RequestHandlerAvgIdlePercent` (< 0.2 means IO threads exhausted).
+
+---
+
+22. **Parameter**: `security.protocol` & `sasl.mechanism`
+    - **Definition**: Configures cluster transport security protocol (`PLAINTEXT`, `SSL`, `SASL_PLAINTEXT`, `SASL_SSL`) and authentication mechanism (`PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`).
+    - **Expected Values**: Local Dev: `PLAINTEXT` | Internal VPC: `SASL_PLAINTEXT` (SCRAM-SHA-512) | Public/Cross-DC: `SASL_SSL` (SCRAM-SHA-512)
+    - **Currently Configured Value**: `PLAINTEXT` (Dev/Internal Docker Network)
+    - **Outcome / System Impact**: Enforces encrypted TLS network wire transfers and authenticated client ACL access permissions.
+    - **Why & When to Configure It**: Prevents unauthorized client reading/writing to Kafka telemetry topics.
+    - **Scaling & Troubleshooting**: TLS encryption adds 3–5% CPU overhead for hardware AES-NI packet encryption.
+
+---
+
+23. **Parameter**: `min.cleanable.dirty.ratio` & `segment.ms`
+    - **Definition**: `min.cleanable.dirty.ratio` sets dirty record threshold percentage before log cleaner runs. `segment.ms` sets forced segment roll time for compacted topics.
+    - **Expected Values**: Normal Compaction: `0.5` (50%), `segment.ms=604800000` (7 Days) | Aggressive Compaction: `0.2` (20%), `segment.ms=86400000` (24 Hours)
+    - **Currently Configured Value**: `0.5` | `segment.ms=604800000`
+    - **Outcome / System Impact**: Controls background cleaner CPU overhead and state store memory retention.
+    - **Why & When to Configure It**: Compacting dirty segments purges old key revisions, saving state store disk space.
+    - **Scaling & Troubleshooting**: Monitor JMX cleaner thread stats `max-dirty-percent`.
+
+---
+
+24. **Parameter**: `isolation.level`
+    - **Definition**: Controls whether consumer reads uncommitted transactional messages (`read_uncommitted`) or only committed transactions (`read_committed`).
+    - **Expected Values**: Non-Transactional Telemetry: `read_uncommitted` | Transactional Ingest / EOS: `read_committed`
+    - **Currently Configured Value**: `read_committed` (Prod) / `read_uncommitted` (Dev)
+    - **Outcome / System Impact**: Guarantees consumers skip aborted transaction records and control markers.
+    - **Why & When to Configure It**: Required when using transactional producers (`begin_transaction`, `commit_transaction`) to prevent reading dirty data.
+    - **Scaling & Troubleshooting**: `read_committed` buffers uncommitted messages in consumer memory until transaction commit marker arrives.
+
+---
+
 ## 2. System-Wide Kafka High-Level (HLD) & Low-Level (LLD) Design
 
 ### 2.1 System High-Level Design (HLD) — Observability Pipeline
@@ -168,7 +258,7 @@ graph TD
 
     B1 -->|Publish Spans and Metrics| C1["llmobs-kafka Broker"]
 
-    subgraph Kafka Cluster Boundary ["llmobs-kafka Broker (cgroup 2048M Limit)"]
+    subgraph KafkaClusterBoundary ["llmobs-kafka Broker (cgroup 2048M Limit)"]
         C1 --> D1["JVM Heap (-Xmx1024M)"]
         C1 --> E1["Linux OS Page Cache"]
         E1 -->|Disk Log Writes| F1["Partition Log Segments (/var/lib/kafka/data)"]
@@ -182,7 +272,6 @@ graph TD
 #### System Integration Configuration & Python Code
 
 ```yaml
-# docker-compose.yml snippet for End-to-End Pipeline
 services:
   llmobs-kafka:
     image: apache/kafka:latest
@@ -194,27 +283,42 @@ services:
 ```
 
 ```python
-# System Pipeline Python Pseudocode: End-to-End Ingest & Consumption
 from confluent_kafka import Producer, Consumer
 
-# 1. Ingest Producer Configuration
 producer_config = {
     'bootstrap.servers': 'localhost:31414',
     'client.id': 'telemetry-ingest-agent',
     'acks': 'all',
+    'enable.idempotence': True,
     'linger.ms': 10,
-    'batch.size': 16384
+    'batch.size': 16384,
+    'max.in.flight.requests.per.connection': 5,
+    'compression.type': 'lz4',
+    'retries': 5,
+    'retry.backoff.ms': 100,
+    'buffer.memory': 33554432,
+    'max.block.ms': 60000
 }
 producer = Producer(producer_config)
 producer.produce('llmobs-spans', key='trace_101', value='{"span_id": "s101", "duration_ms": 42}')
 producer.flush()
 
-# 2. Pipeline Consumer Configuration (ClickHouse Ingest Sink)
 consumer_config = {
     'bootstrap.servers': 'localhost:31414',
     'group.id': 'llmobs-clickhouse-ingest',
+    'client.id': 'clickhouse-ingest-worker-1',
     'auto.offset.reset': 'earliest',
-    'enable.auto.commit': False
+    'enable.auto.commit': False,
+    'auto.commit.interval.ms': 5000,
+    'max.poll.interval.ms': 300000,
+    'max.poll.records': 500,
+    'session.timeout.ms': 45000,
+    'heartbeat.interval.ms': 3000,
+    'fetch.min.bytes': 1048576,
+    'fetch.max.wait.ms': 500,
+    'max.partition.fetch.bytes': 1048576,
+    'isolation.level': 'read_committed',
+    'partition.assignment.strategy': 'cooperative-sticky'
 }
 consumer = Consumer(consumer_config)
 consumer.subscribe(['llmobs-spans'])
@@ -226,14 +330,14 @@ consumer.subscribe(['llmobs-spans'])
 
 ```mermaid
 graph TB
-    subgraph Producer Internals ["Producer Client Execution"]
+    subgraph ProducerInternals ["Producer Client Execution"]
         P_App["Application Record"] --> P_Ser["Serializer"]
         P_Ser --> P_Part["Partitioner (MurmurHash2)"]
         P_Part --> P_Buf["RecordAccumulator (32MB Buffer)"]
         P_Buf --> P_Send["Sender Thread"]
     end
 
-    subgraph Broker Internals ["Broker Internal Execution"]
+    subgraph BrokerInternals ["Broker Internal Execution"]
         P_Send -->|TCP Produce Request| B_Net["Acceptor and Network Threads"]
         B_Net --> B_ReqQ["Request Queue"]
         B_ReqQ --> B_Worker["KafkaRequestHandler Worker Threads"]
@@ -243,7 +347,7 @@ graph TB
         B_Cleaner["Log Retention Cleaner Thread"] -->|Deletes expired segments| B_ClosedLog["Closed Log Segments (.log)"]
     end
 
-    subgraph Consumer Internals ["Consumer Client Execution"]
+    subgraph ConsumerInternals ["Consumer Client Execution"]
         B_PageCache -->|Zero-Copy sendfile| C_Fetch["Consumer Fetcher Thread"]
         C_Fetch --> C_Buf["CompletedFetch Queue"]
         C_Buf --> C_Poll["Consumer poll Loop"]
@@ -263,7 +367,7 @@ graph TD
     Client["Producer / Consumer Clients"] -->|Port 9092| SocketListener["Network Socket Listener"]
     KRaftPeer["KRaft Controller Quorum Peers"] -->|Port 9093| ControllerListener["Controller Listener"]
 
-    subgraph Broker Core Engine ["llmobs-kafka Broker Process"]
+    subgraph BrokerCoreEngine ["llmobs-kafka Broker Process"]
         SocketListener --> NetPool["Network Processing Pool"]
         ControllerListener --> KRaftEngine["KRaft Metadata Engine (@metadata)"]
         NetPool --> WorkPool["I/O Request Handler Pool"]
@@ -275,18 +379,31 @@ graph TD
 #### Broker Configuration & Python Admin Code
 
 ```properties
-# config/kafka/server.properties
 node.id=1
 process.roles=broker,controller
 listeners=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+advertised.listeners=PLAINTEXT://localhost:31414
 num.network.threads=3
 num.io.threads=4
+socket.send.buffer.bytes=1048576
+socket.receive.buffer.bytes=1048576
+socket.request.max.bytes=104857600
+log.dirs=/var/lib/kafka/data
+num.partitions=3
+offsets.topic.num.partitions=3
+default.replication.factor=1
+offsets.topic.replication.factor=1
+min.insync.replicas=1
 log.segment.bytes=104857600
 log.retention.hours=24
+log.roll.hours=2
+log.retention.check.interval.ms=60000
+log.cleaner.enable=true
+log.cleaner.threads=2
+log.cleaner.dedupe.buffer.size=134217728
 ```
 
 ```python
-# Broker Cluster Inspection Python Pseudocode
 from confluent_kafka.admin import AdminClient
 
 admin_client = AdminClient({'bootstrap.servers': 'localhost:31414'})
@@ -312,13 +429,13 @@ graph TB
     RequestQueue -->|Pop Request| IOThread1["KafkaRequestHandler 1"]
     RequestQueue -->|Pop Request| IOThread2["KafkaRequestHandler 2"]
 
-    subgraph Memory Architecture ["Broker Memory Architecture"]
+    subgraph MemoryArchitecture ["Broker Memory Architecture"]
         IOThread1 -->|Allocate Objects| JVMHeap["JVM Heap (-Xmx1024M)<br/>Broker Metadata & Request Queues"]
         IOThread1 -->|Native Buffers| NativeMem["Native Off-Heap Memory<br/>Direct ByteBuffers & Metaspace"]
         IOThread1 -->|Zero-Copy Data| PageCache["Linux OS Page Cache<br/>In-Memory Log Files"]
     end
 
-    subgraph Storage Layout ["Physical Storage Layout (/var/lib/kafka/data)"]
+    subgraph StorageLayout ["Physical Storage Layout (/var/lib/kafka/data)"]
         PageCache -->|Flush| LogFile["00000000000000000000.log<br/>(Message Data)"]
         PageCache -->|Flush| IndexFile["00000000000000000000.index<br/>(Offset Index)"]
         PageCache -->|Flush| TimeIndex["00000000000000000000.timeindex<br/>(Timestamp Index)"]
@@ -350,6 +467,16 @@ graph TB
 
 ---
 
+3. **Parameter**: `num.network.threads` & `num.io.threads`
+   - **Definition**: `num.network.threads` handles incoming TCP NIO network requests. `num.io.threads` handles processing partition disk reads/writes.
+   - **Expected Values**: Base Dev (4 Core): `num.network.threads=3`, `num.io.threads=4` | High-Core Prod (16 Core): `num.network.threads=8`, `num.io.threads=16`
+   - **Currently Configured Value**: `num.network.threads=3` | `num.io.threads=4` (in `config/kafka/server.properties`)
+   - **Outcome / System Impact**: Eliminates broker request queue lock contention under high concurrent producer/consumer connections.
+   - **Why & When to Configure It**: `num.io.threads` must match available physical CPU cores or disk spindles. `num.network.threads` should equal 50% CPU core count.
+   - **Scaling & Troubleshooting**: Monitor JMX metric `RequestHandlerAvgIdlePercent`. Values < 0.2 indicate thread pool exhaustion.
+
+---
+
 ## 4. Producer Architecture & Component Deep-Dive
 
 ### 4.1 Producer High-Level Design (HLD)
@@ -360,7 +487,7 @@ graph TD
     Serializer --> Partitioner["Partitioner (MurmurHash2 / RoundRobin)"]
     Partitioner --> RecordAccumulator["RecordAccumulator (Memory Buffer)"]
 
-    subgraph Background Processing ["Background I/O Thread"]
+    subgraph BackgroundProcessing ["Background I/O Thread"]
         RecordAccumulator --> SenderThread["Sender Thread"]
         SenderThread --> SocketChannel["Network Client and SocketChannel"]
     end
@@ -374,13 +501,13 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph Producer Memory Pool ["Producer Memory Pool (buffer.memory = 32MB)"]
+    subgraph ProducerMemoryPool ["Producer Memory Pool (buffer.memory = 32MB)"]
         BatchP0["Partition 0 Batch<br/>(batch.size = 16KB)"]
         BatchP1["Partition 1 Batch<br/>(batch.size = 16KB)"]
         BatchP2["Partition 2 Batch<br/>(batch.size = 16KB)"]
     end
 
-    subgraph Batch Trigger Logic ["Batch Trigger Conditions"]
+    subgraph BatchTriggerLogic ["Batch Trigger Conditions"]
         Trigger1["Condition 1: Batch Size Full (16 KB)"]
         Trigger2["Condition 2: Linger Time Expired (linger.ms = 10ms)"]
     end
@@ -395,7 +522,7 @@ graph TB
     Trigger1 --> SenderThread["Sender Thread"]
     Trigger2 --> SenderThread
 
-    subgraph In-Flight Network Queue ["In-Flight Queue (max.in.flight.requests = 5)"]
+    subgraph InFlightNetworkQueue ["In-Flight Queue (max.in.flight.requests = 5)"]
         Req1["In-Flight Produce Request 1"]
         Req2["In-Flight Produce Request 2"]
     end
@@ -414,7 +541,6 @@ graph TB
 #### Producer Configuration & Python Producer Code
 
 ```python
-# Producer High-Throughput & Durability Pseudocode
 from confluent_kafka import Producer
 import json, time
 
@@ -426,12 +552,19 @@ def delivery_report(err, msg):
 
 producer = Producer({
     'bootstrap.servers': 'localhost:31414',
+    'client.id': 'telemetry-producer-v1',
     'acks': 'all',
     'enable.idempotence': True,
     'linger.ms': 10,
     'batch.size': 16384,
     'max.in.flight.requests.per.connection': 5,
-    'compression.type': 'lz4'
+    'compression.type': 'lz4',
+    'retries': 5,
+    'retry.backoff.ms': 100,
+    'buffer.memory': 33554432,
+    'max.block.ms': 60000,
+    'queue.buffering.max.messages': 100000,
+    'queue.buffering.max.kbytes': 1048576
 })
 
 for i in range(100):
@@ -481,24 +614,34 @@ producer.flush()
 
 ---
 
+4. **Parameter**: `compression.type`
+   - **Definition**: Sets the compression codec for producer batch payloads (`none`, `gzip`, `snappy`, `lz4`, `zstd`).
+   - **Expected Values**: Telemetry Stream Ingest: `lz4` | High-Ratio Storage: `zstd`
+   - **Currently Configured Value**: `lz4`
+   - **Outcome / System Impact**: Reduces network traffic and broker storage requirements by up to 70% with negligible CPU overhead.
+   - **Why & When to Configure It**: JSON telemetry records contain high redundancy; `lz4` compresses them efficiently before network transmission.
+   - **Scaling & Troubleshooting**: Use `lz4` for high throughput; use `zstd` for maximum disk compression ratio.
+
+---
+
 ## 5. Consumer Architecture & Component Deep-Dive
 
 ### 5.1 Consumer High-Level Design (HLD)
 
 ```mermaid
 graph TD
-    subgraph Consumer Group ["Consumer Group (llmobs-clickhouse-ingest)"]
+    subgraph ConsumerGroup ["Consumer Group (llmobs-clickhouse-ingest)"]
         C1["Consumer Thread 1"]
         C2["Consumer Thread 2"]
         C3["Consumer Thread 3"]
     end
 
-    subgraph Broker Group Coordinator ["Broker Group Coordinator"]
+    subgraph BrokerGroupCoordinator ["Broker Group Coordinator"]
         Coord["Group Coordinator Engine"]
         OffsetTopic["__consumer_offsets Topic"]
     end
 
-    subgraph Kafka Topic Partitions ["Telemetry Topic (3 Partitions)"]
+    subgraph KafkaTopicPartitions ["Telemetry Topic (3 Partitions)"]
         P0["Partition 0"]
         P1["Partition 1"]
         P2["Partition 2"]
@@ -520,7 +663,7 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph Consumer Poll Execution ["Consumer Thread Execution Loop"]
+    subgraph ConsumerPollExecution ["Consumer Thread Execution Loop"]
         PollStart["consumer.poll(Duration.ofMillis(100))"] --> CheckQueue{"CompletedFetch Queue Empty?"}
         CheckQueue -- Yes --> Fetcher["Fetcher Thread sends FetchRequest"]
         CheckQueue -- No --> ConsumerRecords["Return ConsumerRecords Batch"]
@@ -536,7 +679,7 @@ graph TB
         AutoCommit --> OffsetWrite
     end
 
-    subgraph Heartbeat & Liveness Thread ["Background Heartbeat Thread"]
+    subgraph HeartbeatThread ["Background Heartbeat Thread"]
         HBThread["Heartbeat Thread (heartbeat.interval.ms = 3000)"] -->|Send Heartbeat| CoordNode["Group Coordinator"]
         CoordNode -->|Liveness Valid| OK["Keep Partition Assignment"]
         CoordNode -.->|Session Timeout Exceeded 45s| Dead["Mark Consumer Dead and Trigger Rebalance"]
@@ -546,16 +689,24 @@ graph TB
 #### Consumer Manual Commit & Database Ingestion Python Code
 
 ```python
-# Reliable Consumer Manual Commit Python Pseudocode
 from confluent_kafka import Consumer, KafkaError
 
 consumer = Consumer({
     'bootstrap.servers': 'localhost:31414',
     'group.id': 'llmobs-clickhouse-ingest',
+    'client.id': 'clickhouse-consumer-worker',
     'auto.offset.reset': 'earliest',
     'enable.auto.commit': False,
+    'auto.commit.interval.ms': 5000,
     'max.poll.interval.ms': 300000,
-    'session.timeout.ms': 45000
+    'max.poll.records': 500,
+    'session.timeout.ms': 45000,
+    'heartbeat.interval.ms': 3000,
+    'fetch.min.bytes': 1048576,
+    'fetch.max.wait.ms': 500,
+    'max.partition.fetch.bytes': 1048576,
+    'isolation.level': 'read_committed',
+    'partition.assignment.strategy': 'cooperative-sticky'
 })
 consumer.subscribe(['llmobs-spans'])
 
@@ -564,12 +715,7 @@ try:
         msg_list = consumer.consume(num_messages=100, timeout=1.0)
         if not msg_list:
             continue
-        
-        # Batch insert records into ClickHouse
         records_to_insert = [m.value() for m in msg_list if not m.error()]
-        # clickhouse_client.insert('telemetry_spans', records_to_insert)
-        
-        # Manual synchronous offset commit after successful database insert
         consumer.commit(asynchronous=False)
 except KeyboardInterrupt:
     pass
@@ -610,20 +756,29 @@ finally:
 
 ---
 
+4. **Parameter**: `session.timeout.ms` & `heartbeat.interval.ms`
+   - **Definition**: `session.timeout.ms` sets maximum time group coordinator waits for consumer heartbeat. `heartbeat.interval.ms` sets background heartbeat frequency.
+   - **Expected Values**: Standard: `session.timeout.ms=45000`, `heartbeat.interval.ms=3000`
+   - **Currently Configured Value**: `session.timeout.ms=45000` | `heartbeat.interval.ms=3000`
+   - **Outcome / System Impact**: Eliminates false consumer group rebalances caused by minor network jitter or JVM GC pauses.
+   - **Why & When to Configure It**: Rule of thumb is `heartbeat.interval.ms` must be `<= 1/3` of `session.timeout.ms`.
+
+---
+
 ## 6. Topic & Partition Management Architecture
 
 ### 6.1 Topic & Partition High-Level Design (HLD)
 
 ```mermaid
 graph TD
-    subgraph Logical Topic ["Logical Telemetry Topic (llmobs-spans)"]
+    subgraph LogicalTopic ["Logical Telemetry Topic (llmobs-spans)"]
         direction TB
         P0["Partition 0 (Broker 1 Leader)"]
         P1["Partition 1 (Broker 2 Leader)"]
         P2["Partition 2 (Broker 3 Leader)"]
     end
 
-    subgraph Physical Disk Storage ["Physical Disk Directory Structure"]
+    subgraph PhysicalDiskStorage ["Physical Disk Directory Structure"]
         P0 --> D0["/var/lib/kafka/data/llmobs-spans-0/"]
         P1 --> D1["/var/lib/kafka/data/llmobs-spans-1/"]
         P2 --> D2["/var/lib/kafka/data/llmobs-spans-2/"]
@@ -636,7 +791,7 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph Partition Directory Engine ["Partition Engine (/var/lib/kafka/data/llmobs-spans-0/)"]
+    subgraph PartitionDirectoryEngine ["Partition Engine (/var/lib/kafka/data/llmobs-spans-0/)"]
         WriteOp["Produce Record Appended"] --> ActiveSegment["Active Segment: 00000000000000000200.log<br/>(Currently Appending Write)"]
 
         ActiveSegment --> RollCondition{"Segment Full 100MB or Time Expired 2h?"}
@@ -644,14 +799,14 @@ graph TB
         CloseSegment --> OpenNew["Open New Active Segment (.log)"]
         RollCondition -- No --> KeepWriting["Continue Appending Writes"]
 
-        subgraph Index Lookups ["Offset and Time Index Files"]
+        subgraph IndexLookups ["Offset and Time Index Files"]
             OffsetIndex["00000000000000000000.index<br/>(Maps Offset -> Physical Byte Position)"]
             TimeIndex["00000000000000000000.timeindex<br/>(Maps Timestamp -> Offset)"]
         end
 
         CloseSegment --> IndexLookups
 
-        subgraph Log Retention Cleaner ["Log Retention Cleaner Thread"]
+        subgraph LogRetentionCleaner ["Log Retention Cleaner Thread"]
             CleanerScan["Retention Scan (Every 60 Seconds)"] --> RetentionCheck{"Closed Segment Age Exceeds 24 Hours?"}
             RetentionCheck -- Yes --> UnlinkFile["Unlink and Delete Segment Files"]
             RetentionCheck -- No --> RetainSegment["Retain File on Disk"]
@@ -664,20 +819,28 @@ graph TB
 #### Topic Creation & Partition Key Hashing Python Code
 
 ```python
-# Topic Creation & MurmurHash2 Partitioning Pseudocode
 from confluent_kafka.admin import AdminClient, NewTopic
-import mmh3 # MurmurHash3 / MurmurHash2 key calculation
+import mmh3
 
-# 1. Programmatic Topic Creation
 admin = AdminClient({'bootstrap.servers': 'localhost:31414'})
-new_topic = NewTopic('llmobs-spans', num_partitions=3, replication_factor=1)
+new_topic = NewTopic(
+    'llmobs-spans',
+    num_partitions=3,
+    replication_factor=1,
+    config={
+        'cleanup.policy': 'delete',
+        'retention.ms': '86400000',
+        'segment.bytes': '104857600',
+        'segment.ms': '7200000',
+        'min.insync.replicas': '1',
+        'compression.type': 'producer'
+    }
+)
 admin.create_topics([new_topic])
 
-# 2. Key Partition Hashing Calculation (Kafka DefaultPartitioner logic)
 def calculate_kafka_partition(key_bytes, num_partitions=3):
     if key_bytes is None:
         return 0
-    # MurmurHash2 positive integer hash modulo partition count
     hash_val = mmh3.hash(key_bytes) & 0x7fffffff
     return hash_val % num_partitions
 
@@ -691,7 +854,7 @@ print(f"Key 'trace_101' maps to Partition: {calculate_kafka_partition(b'trace_10
 1. **Parameter**: `log.segment.bytes`
    - **Definition**: Maximum byte size per partition segment file before closing and rolling a new active segment file.
    - **Expected Values**: Low/Dev: `104857600` (100 MB) | Medium Prod: `268435456` (256 MB) | High-Throughput Prod: `536870912` (512 MB) or `1073741824` (1 GB)
-   - **Currently Configured Value**: `104857600` (100 MB in `server.properties`)
+   - **Currently Configured Value**: `104857600` (100 MB in `config/kafka/server.properties`)
    - **Outcome / System Impact**: Reclaims ~30 GB of storage space on `/dev/sda2` by preventing inactive topics from holding onto gigabytes of un-purged active segments.
    - **Why & When to Configure It**: Retention rules apply ONLY to closed segments. Active segments are NEVER deleted regardless of age. Setting 100 MB allows low/medium volume topics to close segments rapidly for daily deletion.
    - **Scaling & Troubleshooting**: Increase to 512MB or 1GB in high-throughput production (> 50,000 msgs/sec) to avoid excessive file handle creation.
@@ -701,7 +864,7 @@ print(f"Key 'trace_101' maps to Partition: {calculate_kafka_partition(b'trace_10
 2. **Parameter**: `log.retention.hours`
    - **Definition**: Duration in hours that closed segment files are retained on disk before physical deletion.
    - **Expected Values**: Base Dev: `24` (24 Hours) | Production Buffer: `72` (3 Days) | Long-Buffer Ingest: `168` (7 Days)
-   - **Currently Configured Value**: `24` (24 Hours in `server.properties`)
+   - **Currently Configured Value**: `24` (24 Hours in `config/kafka/server.properties`)
    - **Outcome / System Impact**: Reclaims ~35 GB of disk space on `/dev/sda2` by deleting 1-day-old segments.
    - **Why & When to Configure It**: Kafka is an intermediate buffer. Telemetry data is consumed almost immediately by ClickHouse. Retaining 7 days duplicates data and consumes host storage.
 
@@ -710,7 +873,7 @@ print(f"Key 'trace_101' maps to Partition: {calculate_kafka_partition(b'trace_10
 3. **Parameter**: `log.roll.hours`
    - **Definition**: Maximum time window after which an active segment is forcibly closed, even if segment size is less than 100 MB.
    - **Expected Values**: Low-Volume Topics: `2` (2 Hours) | High-Volume Topics: `12` (12 Hours) or `24` (24 Hours)
-   - **Currently Configured Value**: `2` (2 Hours in `server.properties`)
+   - **Currently Configured Value**: `2` (2 Hours in `config/kafka/server.properties`)
    - **Outcome / System Impact**: Eliminates storage leaks on dormant or low-volume topics.
    - **Why & When to Configure It**: Low-throughput topics take weeks to write 100 MB. Forced rolls every 2 hours guarantee active segments close and become eligible for 24-hour deletion.
 
@@ -722,7 +885,7 @@ print(f"Key 'trace_101' maps to Partition: {calculate_kafka_partition(b'trace_10
 
 ```mermaid
 graph TD
-    subgraph Idempotent Producer Protocol
+    subgraph IdempotentProtocol ["Idempotent Producer Protocol"]
         P1["Producer Client (enable.idempotence=true)"] -->|1. Allocate Producer ID (PID)| B1["Broker Sequence Tracker"]
         P1 -->|2. Send Record Batch (PID: 101, Seq: 0)| B1
         B1 -->|3. Persist Batch Seq 0| S1["Partition Log"]
@@ -735,14 +898,17 @@ graph TD
 #### Transactional Producer & EOS Python Code
 
 ```python
-# Transactional Producer & Read-Committed Consumer Python Code
 from confluent_kafka import Producer, Consumer
 
-# Transactional Producer
 tx_producer = Producer({
     'bootstrap.servers': 'localhost:31414',
     'transactional.id': 'llmobs-producer-tx-1',
-    'enable.idempotence': True
+    'enable.idempotence': True,
+    'transaction.timeout.ms': 900000,
+    'acks': 'all',
+    'linger.ms': 10,
+    'batch.size': 16384,
+    'max.in.flight.requests.per.connection': 5
 })
 tx_producer.init_transactions()
 
@@ -750,15 +916,18 @@ try:
     tx_producer.begin_transaction()
     tx_producer.produce('llmobs-spans', key='t1', value='{"span": 1}')
     tx_producer.produce('llmobs-metrics', key='m1', value='{"metric": 1}')
-    tx_producer.commit_transaction() # Atomic commit across both topics
+    tx_producer.commit_transaction()
 except Exception as e:
     tx_producer.abort_transaction()
 
-# Transactional Consumer
 eos_consumer = Consumer({
     'bootstrap.servers': 'localhost:31414',
     'group.id': 'eos-analytics-sink',
-    'isolation.level': 'read_committed' # Skips aborted transactions
+    'auto.offset.reset': 'earliest',
+    'enable.auto.commit': False,
+    'isolation.level': 'read_committed',
+    'max.poll.interval.ms': 300000,
+    'session.timeout.ms': 45000
 })
 ```
 
@@ -790,39 +959,41 @@ eos_consumer = Consumer({
 
 ```mermaid
 graph LR
-    subgraph Before Compaction
+    subgraph BeforeCompaction ["Before Compaction"]
         K1_V1["Key: K1, Val: V1 (Seq 1)"]
         K2_V1["Key: K2, Val: V1 (Seq 2)"]
         K1_V2["Key: K1, Val: V2 (Seq 3)"]
         K2_V2["Key: K2, Val: V2 (Seq 4)"]
     end
 
-    subgraph Log Compaction Cleaner
+    subgraph LogCompactionCleaner ["Log Compaction Cleaner"]
         CleanerThread["Cleaner Thread"]
     end
 
-    Before Compaction --> CleanerThread
+    BeforeCompaction --> CleanerThread
 
-    subgraph After Compaction
+    subgraph AfterCompaction ["After Compaction"]
         K1_V2_Post["Key: K1, Val: V2 (Seq 3)"]
         K2_V2_Post["Key: K2, Val: V2 (Seq 4)"]
     end
 
-    CleanerThread --> After Compaction
+    CleanerThread --> AfterCompaction
 ```
 
 #### Compaction State Store & Tombstone Deletion Python Code
 
 ```python
-# State Store Compaction & Tombstone Write Pseudocode
 from confluent_kafka import Producer
 
-producer = Producer({'bootstrap.servers': 'localhost:31414'})
+producer = Producer({
+    'bootstrap.servers': 'localhost:31414',
+    'acks': 'all',
+    'enable.idempotence': True,
+    'linger.ms': 10,
+    'batch.size': 16384
+})
 
-# 1. Update State Key
 producer.produce('user-service-registry', key='service_auth', value='v2.1.0')
-
-# 2. Tombstone Delete Marker (sending None payload triggers compaction deletion)
 producer.produce('user-service-registry', key='service_deprecated', value=None)
 producer.flush()
 ```
@@ -854,12 +1025,10 @@ producer.flush()
 ### 9.1 Emergency Incident 1: Host Disk Storage 100% Full
 
 ```bash
-# Step 1: Identify top storage-consuming topics
 docker exec -it llmobs-kafka-broker kafka-logdirs.sh \
   --bootstrap-server localhost:9092 \
   --describe
 
-# Step 2: Dynamically override retention to 1 hour for the bloated topic
 docker exec -it llmobs-kafka-broker kafka-configs.sh \
   --bootstrap-server localhost:9092 \
   --entity-type topics \
@@ -867,7 +1036,6 @@ docker exec -it llmobs-kafka-broker kafka-configs.sh \
   --alter \
   --add-config retention.ms=3600000
 
-# Step 3: Verify retention cleaner purges closed log segments
 docker exec -it llmobs-kafka-broker kafka-topics.sh \
   --bootstrap-server localhost:9092 \
   --describe \
@@ -879,13 +1047,11 @@ docker exec -it llmobs-kafka-broker kafka-topics.sh \
 ### 9.2 Emergency Incident 2: Under-Replicated Partitions (URP)
 
 ```bash
-# Step 1: List all under-replicated partitions across the cluster
 docker exec -it llmobs-kafka-broker kafka-topics.sh \
   --bootstrap-server localhost:9092 \
   --describe \
   --under-replicated-partitions
 
-# Step 2: Check broker disk directories for I/O errors or full drives
 docker exec -it llmobs-kafka-broker kafka-logdirs.sh \
   --bootstrap-server localhost:9092 \
   --describe
@@ -896,13 +1062,11 @@ docker exec -it llmobs-kafka-broker kafka-logdirs.sh \
 ### 9.3 Emergency Incident 3: Consumer Group Lag & Offset Reset
 
 ```bash
-# Step 1: Inspect consumer group lag across all topics
 docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 \
   --describe \
   --group llmobs-clickhouse-ingest
 
-# Step 2: Reset consumer group offsets to latest (skip broken buffer)
 docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 \
   --group llmobs-clickhouse-ingest \
@@ -918,7 +1082,7 @@ docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
 
 ```mermaid
 graph TB
-    subgraph Multi-Broker KRaft Cluster Architecture
+    subgraph MultiBrokerCluster ["Multi-Broker KRaft Cluster Architecture"]
         direction LR
         B1["Kafka Broker 1 (Node ID 1)<br/>Heap: 2048M | cgroup: 4096M"]
         B2["Kafka Broker 2 (Node ID 2)<br/>Heap: 2048M | cgroup: 4096M"]
@@ -933,7 +1097,6 @@ graph TB
 #### Multi-Broker Production Override Configuration & Connection Code
 
 ```yaml
-# docker-compose.prod.yml
 services:
   llmobs-kafka-1:
     environment:
@@ -947,12 +1110,18 @@ services:
 ```
 
 ```python
-# Multi-Node Cluster Client Connection Code
 from confluent_kafka import Producer
 
 cluster_producer = Producer({
     'bootstrap.servers': 'kafka1:9092,kafka2:9092,kafka3:9092',
+    'client.id': 'multi-node-prod-producer',
     'acks': 'all',
-    'retries': 5
+    'enable.idempotence': True,
+    'linger.ms': 20,
+    'batch.size': 65536,
+    'max.in.flight.requests.per.connection': 5,
+    'compression.type': 'lz4',
+    'retries': 10,
+    'retry.backoff.ms': 100
 })
 ```
