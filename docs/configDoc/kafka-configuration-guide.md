@@ -2164,34 +2164,60 @@ graph LR
 ### 13.3 Critical Metric Thresholds and Alert Rules Low-Level Design (LLD)
 
 ```mermaid
-graph TB
-    subgraph AlertDecisionEngine ["Prometheus Alert Rule Decision Engine"]
-        URP["kafka_server_under_replicated_partitions"] -->|Value GT 0 for 2m| URPAlert["CRITICAL: Under-Replicated Partitions"]
-        ActiveCtrl["kafka_controller_active_controller_count"] -->|Value NE 1| CtrlAlert["CRITICAL: No Active Controller"]
-        BytesIn["kafka_server_broker_topic_metrics_BytesInPerSec"] -->|GT 50MBps for 5m| ThroughputAlert["WARNING: High Ingestion Rate"]
-        ReqIdle["kafka_network_request_handler_avg_idle_percent"] -->|LT 0.2 for 5m| ThreadAlert["WARNING: Request Handler Exhaustion"]
-        GCPause["jvm_gc_pause_seconds_max"] -->|GT 0.5s| GCAlert["WARNING: Long GC Pauses"]
-        HeapUsed["jvm_memory_used_bytes (heap)"] -->|GT 80 pct of max| HeapAlert["WARNING: High Heap Usage"]
-        ConsumerLag["kafka_consumer_lag"] -->|GT 10000 for 10m| LagAlert["WARNING: Consumer Lag Growing"]
-        DiskUsage["node_filesystem_avail_bytes"] -->|LT 10 pct free| DiskAlert["CRITICAL: Disk Space Low"]
+graph LR
+    subgraph MetricSource ["Monitored Metrics"]
+        URP["kafka_server_under_replicated_partitions"]
+        ActiveCtrl["kafka_controller_active_controller_count"]
+        DiskUsage["node_filesystem_avail_bytes"]
+        BytesIn["kafka_server_broker_topic_metrics_BytesInPerSec"]
+        ReqIdle["kafka_network_request_handler_avg_idle_percent"]
+        GCPause["jvm_gc_pause_seconds_max"]
+        HeapUsed["jvm_memory_used_bytes - Heap RAM"]
+        ConsumerLag["kafka_consumer_lag"]
     end
 
+    subgraph CriticalAlerts ["Critical Priority Alerts"]
+        URPAlert["CRITICAL: Under-Replicated Partitions"]
+        CtrlAlert["CRITICAL: No Active Controller"]
+        DiskAlert["CRITICAL: Disk Space Low"]
+    end
+
+    subgraph WarningAlerts ["Warning Priority Alerts"]
+        ThroughputAlert["WARNING: High Ingestion Rate"]
+        ThreadAlert["WARNING: Request Handler Exhaustion"]
+        GCAlert["WARNING: Long GC Pauses"]
+        HeapAlert["WARNING: High Heap Usage"]
+        LagAlert["WARNING: Consumer Lag Growing"]
+    end
+
+    URP -->|GT 0 for 2m| URPAlert
+    ActiveCtrl -->|NE 1| CtrlAlert
+    DiskUsage -->|LT 10 pct free| DiskAlert
+
+    BytesIn -->|GT 50MBps for 5m| ThroughputAlert
+    ReqIdle -->|Idle LT 20 pct| ThreadAlert
+    GCPause -->|Pause GT 500ms| GCAlert
+    HeapUsed -->|GT 80 pct max| HeapAlert
+    ConsumerLag -->|Lag GT 10000| LagAlert
+
     style URP fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style URPAlert fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
     style ActiveCtrl fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style CtrlAlert fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
-    style BytesIn fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style ThroughputAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
-    style ReqIdle fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style ThreadAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
-    style GCPause fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style GCAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
-    style HeapUsed fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style HeapAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
-    style ConsumerLag fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style LagAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
     style DiskUsage fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style BytesIn fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style ReqIdle fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style GCPause fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style HeapUsed fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style ConsumerLag fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+
+    style URPAlert fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style CtrlAlert fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
     style DiskAlert fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+
+    style ThroughputAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style ThreadAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style GCAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style HeapAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style LagAlert fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -2296,23 +2322,33 @@ producer.flush(timeout=30)
 
 ```mermaid
 graph TD
-    subgraph RetryEngine ["Producer Retry Decision Engine"]
-        SendCall["producer.produce() Called"] --> LibQueue["Message Queued in Buffer"]
+    subgraph ClientFlow ["Producer Send Pipeline"]
+        SendCall["producer.produce Call"] --> LibQueue["Message Queued in Buffer"]
         LibQueue --> NetSend["Network Send to Broker"]
-        NetSend --> BrokerResponse{"Broker Response?"}
-
-        BrokerResponse -->|Success ACK| DeliverOK["Delivery Callback: Success"]
-
-        BrokerResponse -->|Retriable Error| CheckTimeout{"delivery.timeout.ms Exceeded?"}
-        CheckTimeout -->|No| Backoff["Wait retry.backoff.ms"]
-        Backoff --> NetSend
-        CheckTimeout -->|Yes| DeliverFail["Delivery Callback: Timeout Error"]
-
-        BrokerResponse -->|Non-Retriable Error| DeliverFatalErr["Delivery Callback: Fatal Error"]
-
-        NetSend -->|Connection Lost| ReconnectLoop["Reconnect Backoff Loop"]
-        ReconnectLoop -->|reconnect.backoff.max.ms| NetSend
+        NetSend --> BrokerResponse{"Broker Response Type"}
     end
+
+    subgraph ErrorHandling ["Retry and Backoff Handling"]
+        CheckTimeout{"delivery.timeout.ms Exceeded?"}
+        Backoff["Wait retry.backoff.ms"]
+        ReconnectWait["Wait reconnect.backoff.max.ms"]
+    end
+
+    subgraph TerminalStates ["Final Delivery Status"]
+        DeliverOK["Delivery Callback: Success"]
+        DeliverFail["Delivery Callback: Timeout Error"]
+        DeliverFatalErr["Delivery Callback: Fatal Error"]
+    end
+
+    BrokerResponse -->|Success ACK| DeliverOK
+    BrokerResponse -->|Non-Retriable Error| DeliverFatalErr
+    BrokerResponse -->|Retriable Error| CheckTimeout
+    NetSend -->|Connection Lost| ReconnectWait
+
+    CheckTimeout -->|Yes| DeliverFail
+    CheckTimeout -->|No| Backoff
+    Backoff -.->|Retry Attempt| NetSend
+    ReconnectWait -.->|Reconnect Attempt| NetSend
 
     style SendCall fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style LibQueue fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -2321,9 +2357,9 @@ graph TD
     style DeliverOK fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style CheckTimeout fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style Backoff fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style ReconnectWait fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
     style DeliverFail fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
     style DeliverFatalErr fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
-    style ReconnectLoop fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
 ```
 
 ---
