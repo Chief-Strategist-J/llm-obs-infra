@@ -124,7 +124,7 @@ To avoid scrolling back and forth between sections, this master reference provid
     - **Currently Configured Value**: Mounted (`docker-compose.yml` line 293)
     - **Outcome / System Impact**: **Verified:** `to_regclass('public.security_audit_logs')` now resolves after a fresh boot. Previously the table existed in no deployed database.
     - **Why & When to Configure It**: The file was tracked and referenced by compliance documentation, but mounted nowhere, so every write to it failed — silenced by `|| true` in `gdpr-erasure.sh`. Security audit finding **H-01**.
-    - **Scaling & Troubleshooting**: `/docker-entrypoint-initdb.d/` runs **only when the data directory is empty**. On an existing `alloydb_data` volume the table must be created manually — see §8.4§.
+    - **Scaling & Troubleshooting**: `/docker-entrypoint-initdb.d/` runs **only when the data directory is empty**. On an existing `alloydb_data` volume the table must be created manually — see §8.4.
 
 ---
 
@@ -263,7 +263,7 @@ To avoid scrolling back and forth between sections, this master reference provid
     - **Currently Configured Value**: `on`, copy into the `alloydb_archive` volume, `3600` (`config/alloydb/postgresql.conf`)
     - **Outcome / System Impact**: **Verified by an actual restore drill** (§8): a base backup plus archived WAL was recovered to a chosen timestamp, and a write made after that timestamp was correctly discarded.
     - **Why & When to Configure It**: Before this, losing `alloydb_data` lost every workflow Temporal had ever recorded. `wal_level = replica` alone recovers nothing.
-    - **Scaling & Troubleshooting**: **If `archive_command` fails, PostgreSQL retries forever and WAL accumulates in `pg_wal` until the filesystem fills and the database stops.** Watch `SELECT * FROM pg_stat_archiver` — `failed_count` must stay at 0. The archive is **not self-pruning**; see the `pg_archivecleanup` step in §8.3§. Budget roughly 16MB per hour of write activity, plus 16MB per forced switch.
+    - **Scaling & Troubleshooting**: **If `archive_command` fails, PostgreSQL retries forever and WAL accumulates in `pg_wal` until the filesystem fills and the database stops.** Watch `SELECT * FROM pg_stat_archiver` — `failed_count` must stay at 0. The archive is **not self-pruning**; see the `pg_archivecleanup` step in §8.3. Budget roughly 16MB per hour of write activity, plus 16MB per forced switch.
 
 ---
 
@@ -283,7 +283,7 @@ To avoid scrolling back and forth between sections, this master reference provid
     - **Currently Configured Value**: limit `"2.0"`, reservation `"0.5"` (`docker-compose.yml`)
     - **Outcome / System Impact**: **Verified** applied as `NanoCpus=2000000000`. Previously only memory was bounded, so a runaway query or an aggressive autovacuum could saturate all 4 host cores and starve the nine co-resident services.
     - **Why & When to Configure It**: The guide repeatedly notes the host is shared; bounding memory alone leaves the other contended resource open. 2.0 of 4 cores lets PostgreSQL use parallelism while guaranteeing headroom.
-    - **Scaling & Troubleshooting**: Too low and `max_parallel_workers_per_gather` cannot be used effectively. Watch throttling with `docker stats` and, inside the container, `cat /sys/fs/cgroup/cpu.stat`. **Disk I/O is still unbounded** — see §9.2§.
+    - **Scaling & Troubleshooting**: Too low and `max_parallel_workers_per_gather` cannot be used effectively. Watch throttling with `docker stats` and, inside the container, `cat /sys/fs/cgroup/cpu.stat`. **Disk I/O is still unbounded** — see §9.4.
 
 ---
 
@@ -324,6 +324,7 @@ llmobs-alloydb:
 ```
 
 ```python
+import os
 import psycopg2
 
 conn = psycopg2.connect(
@@ -457,6 +458,7 @@ google_columnar_engine.memory_size_in_mb = 256
 ```
 
 ```python
+import os
 import psycopg2
 
 conn = psycopg2.connect(host='localhost', port=31420, user='admin',
@@ -588,6 +590,7 @@ max_connections = 80
 ```
 
 ```python
+import os
 import psycopg2
 from psycopg2 import pool
 
@@ -668,6 +671,7 @@ Full definitions, per-environment expected values and scaling guidance live once
 ### 5.1 Engine Inspection Python Code
 
 ```python
+import os
 import psycopg2
 
 conn = psycopg2.connect(host='localhost', port=31420, user='admin',
@@ -770,6 +774,7 @@ effective_io_concurrency = 200
 ```
 
 ```python
+import os
 import psycopg2
 
 conn = psycopg2.connect(host='localhost', port=31420, user='admin',
@@ -936,7 +941,7 @@ docker exec llmobs-alloydb-db psql -U admin -d llm_observability -c \
    WHERE state = 'idle' AND state_change < now() - interval '1 hour'"
 ```
 
-**Resolution order:** `FATAL: sorry, too many clients already` means `max_connections` is exhausted. `FATAL: remaining connection slots are reserved for non-replication superuser connections` means a **non-superuser** role hit AlloyDB's 30-slot reservation while superuser slots remained — raise `max_connections`, do not cut the reservation.
+**Resolution order:** with `idle_in_transaction_session_timeout = 300s` now set, leaked idle-in-transaction sessions clear themselves and the manual kill above should rarely be needed — if it is, something is holding transactions open under 5 minutes in a loop. `FATAL: sorry, too many clients already` means `max_connections` is exhausted. `FATAL: remaining connection slots are reserved for non-replication superuser connections` means a **non-superuser** role hit AlloyDB's 30-slot reservation while superuser slots remained — raise `max_connections`, do not cut the reservation.
 
 ---
 
@@ -989,6 +994,12 @@ docker exec llmobs-alloydb-db psql -U admin -d llm_observability -c \
 | `checkpoints are occurring too frequently` | Raise `max_wal_size` | Lower `checkpoint_completion_target` |
 | Table bloat, dead tuples climbing | Raise `autovacuum_max_workers` | Disable autovacuum |
 | `security_audit_logs does not exist` | Apply the SQL manually — §7.4 | Assume the initdb.d mount fixed an existing volume |
+| `pg_stat_archiver.failed_count` climbing | Fix the archive target **now** — WAL is accumulating and will fill the disk | Ignore it; this ends in a stopped database |
+| Disk filling with no obvious table growth | Check `pg_wal` size — a failing `archive_command` is the usual cause | Delete WAL by hand |
+| `canceling statement due to statement timeout` | Raise per session for migrations and index builds | Raise `statement_timeout` globally |
+| `canceling statement due to lock timeout` | Find the blocker via `pg_blocking_pids()` | Raise `lock_timeout` to mask the contention |
+| `age(datfrozenxid)` above 150M | Investigate autovacuum throughput before the 200M force threshold | Wait for the 2-billion hard stop |
+| Slow queries reported but no idea which | Rank with `pg_stat_statements` by `total_exec_time` | Rely on `log_min_duration_statement` alone |
 
 ---
 
@@ -1042,8 +1053,8 @@ Before the changes documented here, `wal_level = replica` made PITR *theoretical
 | **RPO** (worst-case data loss) | **1 hour** | `archive_timeout = 3600` forces a WAL switch even when a 16MB segment has not filled |
 | **RPO** (typical, under load) | minutes | A busy segment fills and archives long before the hour elapses |
 | **RTO** (measured in the drill) | **under 1 minute** for a ~100MB database | Base-backup restore plus WAL replay; scales with database size and WAL volume |
-| **Retention** | **unbounded — must be pruned** | The archive is not self-pruning. See §8.3§ |
-| **Off-host durability** | **none** | Archive and data both live on the same host. See §8.4§ |
+| **Retention** | **unbounded — must be pruned** | The archive is not self-pruning. See §8.3 |
+| **Off-host durability** | **none** | Archive and data both live on the same host. See §8.4 |
 
 ### 8.2 Backup & Recovery High-Level Design
 
@@ -1151,12 +1162,12 @@ Rows written before the target survived; the row written after it did not.
 
 | Gap | Consequence | Status |
 |---|---|---|
-| **No scheduled base backup** | The commands in §8.3§ are manual. Nothing runs them. | Needs a cron or scheduled job; the stack has no scheduler |
+| **No scheduled base backup** | The commands in §8.3 are manual. Nothing runs them. | Needs a cron or scheduled job; the stack has no scheduler |
 | **No off-host copy** | `alloydb_archive` and `alloydb_data` live on the same disk. Losing the host loses both, and PITR with it. | Needs object storage or an off-host target |
 | **No automated archive pruning** | The archive grows until the disk fills, on a host already at 72%. | `pg_archivecleanup` must be scheduled |
 | **Drill is manual** | Recovery is verified as of this writing, not continuously. | Needs periodic re-drilling to stay trustworthy |
 
-**This is a real but incomplete capability.** Recovery is now possible and proven; it is not yet automated, off-host, or self-maintaining. Treat the RPO/RTO figures in §8.1§ as achievable-on-demand, not as an operating guarantee.
+**This is a real but incomplete capability.** Recovery is now possible and proven; it is not yet automated, off-host, or self-maintaining. Treat the RPO/RTO figures in §8.1 as achievable-on-demand, not as an operating guarantee.
 
 ---
 
@@ -1178,7 +1189,7 @@ What exists today, and what a standby would need:
 | Promotion procedure and a documented failover trigger | **Missing** |
 | Application-side reconnect and read/write split | **Missing** |
 
-Until those exist, the honest availability posture is: **restore from backup, with the RTO in §8.1§**. A host or volume failure means an outage of that length, not a failover.
+Until those exist, the honest availability posture is: **restore from backup, with the RTO in §8.1**. A host or volume failure means an outage of that length, not a failover.
 
 ### 9.2 Monitoring — Nothing Is Wired
 

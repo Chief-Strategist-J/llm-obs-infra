@@ -712,45 +712,17 @@ graph TB
 
 ### 3.4 Memory & Cache Detailed Configuration Breakdown
 
-1. **Parameter**: `max_server_memory_usage`
-   - **Definition**: Global ceiling for the internal memory tracker covering all queries, caches, merges and background pools.
-   - **Expected Values**: Dev: `3758096384` (3.5 GiB) | Prod: `7516192768` (7 GiB)
-   - **Currently Configured Value**: `3758096384` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: Sits at 87.5% of the cgroup, leaving 512 MiB for fragmentation and untracked allocations so the tracker throws before the kernel acts.
-   - **Why & When to Configure It**: Measured default is `0` — unlimited. Without it there is no catchable boundary at all.
-   - **Scaling & Troubleshooting**: Formula: `cgroup x 0.875`. Never exceed ~90%. Monitor `system.metrics` metric `MemoryTracking`; sustained values near the ceiling mean the cgroup, not the setting, is the constraint.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `max_server_memory_usage` | `3758096384` (3.5 GiB) | Global tracker ceiling at 87.5% of the cgroup, the catchable backstop before the OOM killer | §1.1 item 2 |
+| `mark_cache_size` | `536870912` (512 MiB) | Sparse-index mark cache; its 5 GiB default ceiling exceeded the whole container | §1.1 item 4 |
+| `uncompressed_cache_size` | `0` | Decompressed-block cache the image ships at 2 GiB, half the container | §1.1 item 5 |
+| `max_server_memory_usage_to_ram_ratio` | `0.9` | Ratio guard that binds only if the cgroup shrinks; already the default | §1.1 item 3 |
 
 ---
 
-2. **Parameter**: `mark_cache_size`
-   - **Definition**: LRU cache of MergeTree sparse-index marks used to skip granules during column scans.
-   - **Expected Values**: Dev: `536870912` (512 MiB) | Prod: `1073741824` (1 GiB) | Enterprise: `5368709120` (5 GiB)
-   - **Currently Configured Value**: `536870912` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: Removes the primary `Exit 137` cause by bringing a 5 GiB ceiling inside a 4 GiB container.
-   - **Why & When to Configure It**: The cache does not leak — it is a bounded LRU — but its *ceiling* was set above its *enclosure*, so it grows past the cgroup before evicting.
-   - **Scaling & Troubleshooting**: **Must never be `0`**; floor is ~500 MB. Watch `MarkCacheMisses` in `system.events`; a collapsing hit rate on wide scans is the signal to raise this *and* the container limit together.
-
----
-
-3. **Parameter**: `uncompressed_cache_size`
-   - **Definition**: Ceiling for the decompressed column-block cache layered above the OS page cache.
-   - **Expected Values**: Analytical: `0` | Point-read heavy: `1073741824` | Image default: `2147483648`
-   - **Currently Configured Value**: `0` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: Closes a 2 GiB latent exposure equal to half the container budget.
-   - **Why & When to Configure It**: The image sets 2 GiB, not the 8 GiB usually quoted. Only populated when `use_uncompressed_cache=1`, but zeroing the ceiling makes that unreachable.
-   - **Scaling & Troubleshooting**: `0` is legal here (unlike the mark cache) and verified to boot clean. The OS page cache provides the same locality without competing for the cgroup.
-
----
-
-4. **Parameter**: `max_server_memory_usage_to_ram_ratio`
-   - **Definition**: Ratio ceiling; effective limit is the minimum of this and the absolute value.
-   - **Expected Values**: Standard: `0.9` | Shared cgroup: `0.8`
-   - **Currently Configured Value**: `0.9` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: No change today — `0.9` is already the measured default and `0.9 x 4 GiB` exceeds the absolute 3.5 GiB.
-   - **Why & When to Configure It**: Pure safety net for the case where someone lowers the container limit without editing the absolute ceiling.
-   - **Scaling & Troubleshooting**: Do not reason about capacity using this value; it only binds below a ~3.9 GiB cgroup.
-
----
 ## 4. Query Admission Control & Connection Architecture
 
 ### 4.1 Admission Configuration & Python Concurrency Code
@@ -866,45 +838,17 @@ sequenceDiagram
 
 ### 4.4 Admission Control Detailed Configuration Breakdown
 
-1. **Parameter**: `max_concurrent_queries`
-   - **Definition**: Maximum queries executing simultaneously across the whole server.
-   - **Expected Values**: Dev (4 core): `16` | Prod (8 core): `32` | Enterprise (32 core): `128`
-   - **Currently Configured Value**: `16` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: 4 slots per CPU core. Bounds the thread x memory product before allocation begins.
-   - **Why & When to Configure It**: Measured default is `0` — unlimited. This is the only gate that acts *before* memory is committed.
-   - **Scaling & Troubleshooting**: Rule of thumb `4 x cores`. **Raise only together with `queue_max_wait_ms`.** Symptom of being too low: `TOO_MANY_SIMULTANEOUS_QUERIES` about 3s after a refresh. Monitor metric `Query` in `system.metrics`.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `max_concurrent_queries` | `16` | The admission gate — 4 slots per core, bounding threads x memory before allocation | §1.1 item 6 |
+| `queue_max_wait_ms` | `3000` | Mandatory partner: turns burst saturation into latency rather than errors | §1.1 item 7 |
+| `max_execution_time` | `300` | Reclaims a scarce slot from a runaway query | §1.1 item 8 |
+| `max_connections` / `keep_alive_timeout` | `512` / `300` | Socket ceiling and pooled-client reuse; deliberately never the limiter | §1.1 items 9-10 |
 
 ---
 
-2. **Parameter**: `queue_max_wait_ms`
-   - **Definition**: How long a query waits for a free slot before failing.
-   - **Expected Values**: Dev: `3000` | Latency-tolerant: `10000` | Fail-fast API: `500`
-   - **Currently Configured Value**: `3000` (in `config/clickhouse/users.d/override.xml`)
-   - **Outcome / System Impact**: Absorbs Grafana panel bursts that drain in well under a second.
-   - **Why & When to Configure It**: Measured default `0` means fail immediately, which makes a bounded concurrency cap actively harmful.
-   - **Scaling & Troubleshooting**: Never `0` while concurrency is capped. Too high and clients hang rather than failing cleanly.
-
----
-
-3. **Parameter**: `max_execution_time`
-   - **Definition**: Wall-clock ceiling per query before cancellation.
-   - **Expected Values**: Dev: `300` | Interactive tier: `60` | Batch: `1800`
-   - **Currently Configured Value**: `300` (in `config/clickhouse/users.d/override.xml`)
-   - **Outcome / System Impact**: Every slot is reclaimed within 5 minutes. Verified firing (`Code: 159 ... TIMEOUT_EXCEEDED`).
-   - **Why & When to Configure It**: A scarce slot held forever by a stuck query is an availability problem, not a nuisance.
-   - **Scaling & Troubleshooting**: Prefer `SET max_execution_time = 1800` per session over raising the global default.
-
----
-
-4. **Parameter**: `max_connections` & `keep_alive_timeout`
-   - **Definition**: Socket ceiling, and idle-connection reuse window for HTTP clients.
-   - **Expected Values**: `512` / `300` (pooled clients) | `1024` / `30` (high fan-out, ephemeral clients)
-   - **Currently Configured Value**: `512` and `300` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: Bounds pre-query socket cost while eliminating per-panel reconnect churn.
-   - **Why & When to Configure It**: Measured defaults are `4096` and `30`. 512 sits far above the 16 query slots deliberately so it is never the limiter.
-   - **Scaling & Troubleshooting**: Monitor `TCPConnection` and `HTTPConnection` in `system.metrics`. Keep well below the `262144` `nofile` ulimit.
-
----
 ## 5. Per-Query Resource Governance (Profile Layer)
 
 ### 5.1 Profile Configuration & Python Query Governance Code
@@ -1023,45 +967,17 @@ graph TB
 
 ### 5.4 Profile Detailed Configuration Breakdown
 
-1. **Parameter**: `max_memory_usage`
-   - **Definition**: Peak memory one query may hold before `MEMORY_LIMIT_EXCEEDED`.
-   - **Expected Values**: Dev: `2147483648` (2 GiB) | Prod: `4294967296` (4 GiB)
-   - **Currently Configured Value**: `2147483648` (in `config/clickhouse/users.d/override.xml`)
-   - **Outcome / System Impact**: Stops one pathological high-cardinality `GROUP BY` consuming the whole budget alone.
-   - **Why & When to Configure It**: Measured default `0`. The 16 x 2 GiB oversubscription is deliberate — real queries never approach their cap, and the server ceiling is the true backstop.
-   - **Scaling & Troubleshooting**: Prefer lowering the spill thresholds over raising this. Inspect actual usage with `SELECT query, formatReadableSize(memory_usage) FROM system.query_log ORDER BY memory_usage DESC LIMIT 10`.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `max_memory_usage` | `2147483648` (2 GiB) | Per-query cap; deliberately oversubscribed against the server ceiling | §1.1 item 11 |
+| `max_bytes_before_external_group_by` / `_sort` | `1073741824` each | Spill thresholds at exactly half the per-query cap | §1.1 item 12 |
+| `max_memory_usage_for_all_queries` | `3221225472` | Obsolete legacy cap, retained only while the image tag is unpinned | §1.1 item 13 |
+| `use_uncompressed_cache` | `0` | The switch that actually governs the uncompressed cache | §1.1 item 14 |
 
 ---
 
-2. **Parameter**: `max_bytes_before_external_group_by` & `max_bytes_before_external_sort`
-   - **Definition**: Thresholds past which aggregation or sort state spills to `/var/lib/clickhouse/tmp`.
-   - **Expected Values**: Dev: `1073741824` each | Prod: `2147483648` each
-   - **Currently Configured Value**: `1073741824` for both (in `config/clickhouse/users.d/override.xml`)
-   - **Outcome / System Impact**: Large aggregations complete slowly rather than failing at the 2 GiB cap.
-   - **Why & When to Configure It**: Measured default `0` disables spilling entirely, so any oversized aggregation simply throws.
-   - **Scaling & Troubleshooting**: **Always maintain `= max_memory_usage / 2`.** Consumes host disk transiently; watch free space on `/dev/sda2` during heavy analytical windows.
-
----
-
-3. **Parameter**: `max_memory_usage_for_all_queries`
-   - **Definition**: Legacy per-user aggregate cap, superseded by `max_server_memory_usage`.
-   - **Expected Values**: Obsolete — any value
-   - **Currently Configured Value**: `3221225472` (in `config/clickhouse/users.d/override.xml`)
-   - **Outcome / System Impact**: No runtime effect on this version.
-   - **Why & When to Configure It**: Retained only because the image tag is unpinned and an obsolete setting warns rather than errors.
-   - **Scaling & Troubleshooting**: Delete once the image is pinned. Do not use it in capacity calculations.
-
----
-
-4. **Parameter**: `use_uncompressed_cache`
-   - **Definition**: Per-query switch governing whether the uncompressed cache is populated.
-   - **Expected Values**: Analytical: `0` | Point reads: `1`
-   - **Currently Configured Value**: `0` (in `config/clickhouse/users.d/override.xml`)
-   - **Outcome / System Impact**: None today — already the default. Closes the `uncompressed_cache_size` exposure from the usage side.
-   - **Why & When to Configure It**: Declared so the disabled cache reads as a decision that survives an image bump.
-   - **Scaling & Troubleshooting**: Enabling this alone does nothing while `uncompressed_cache_size` is `0`; both must change together.
-
----
 ## 6. Container Lifecycle, Entrypoint & Access Provisioning
 
 ### 6.1 Container Configuration & Python Bootstrap Verification Code
@@ -1236,45 +1152,17 @@ graph TD
 
 ### 6.4 Container Lifecycle Detailed Configuration Breakdown
 
-1. **Parameter**: `volumes` — `config.d`, `users.d`, `clickhouse_data`
-   - **Definition**: Server config (read-only), user config (writable), and the persistent data directory.
-   - **Expected Values**: `config.d` always `:ro` | `users.d` writable unless `CLICKHOUSE_SKIP_USER_SETUP=1` | data always a named volume
-   - **Currently Configured Value**: `config.d:...:ro`, `users.d:...` writable, `clickhouse_data:/var/lib/clickhouse`
-   - **Outcome / System Impact**: `clickhouse_data` holds MergeTree parts, system log tables, the access store and `/tmp` spill files.
-   - **Why & When to Configure It**: `users.d` must be writable because the entrypoint regenerates `default-user.xml` there on every boot.
-   - **Scaling & Troubleshooting**: **Verified: `:ro` on `users.d` exits the container immediately** with `/entrypoint.sh: line 122: ...: Read-only file system`. Use `CLICKHOUSE_SKIP_USER_SETUP=1` instead of hardening the mount.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `volumes` (`config.d`, `users.d`, `clickhouse_data`) | `:ro`, writable, named volume | `users.d` must be writable — the entrypoint rewrites `default-user.xml` every boot | §1.1 item 26 |
+| `CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT` | `1` | Grants CREATE USER/GRANT to the shared account; audit H-07 | §1.1 item 32 |
+| `healthcheck` | `/ping` every 5s, `start_period 20s` | Absorbs the two-phase entrypoint startup | §1.1 item 29 |
+| `ulimits.nofile` | `262144` | Descriptor headroom that lets `max_connections` sit at 512 | §1.1 item 28 |
 
 ---
 
-2. **Parameter**: `CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT`
-   - **Definition**: Grants the account `CREATE USER`, `GRANT` and `CREATE ROLE`.
-   - **Expected Values**: Dev: `1` | Hardened/Prod: `0`
-   - **Currently Configured Value**: `1` (in `docker-compose.yml`)
-   - **Outcome / System Impact**: **Verified** mapped onto the entrypoint's internal `CLICKHOUSE_ACCESS_MANAGEMENT` at line 52, so the compose variable name is correct.
-   - **Why & When to Configure It**: Convenient in development; a privilege-escalation path anywhere else.
-   - **Scaling & Troubleshooting**: Audit **H-07**. Anyone with the password can provision durable credentials of their own. Set `0` to harden.
-
----
-
-3. **Parameter**: `healthcheck`
-   - **Definition**: Liveness probe against the HTTP `/ping` endpoint.
-   - **Expected Values**: Dev: `5s` interval, `start_period 20s` | Prod: `10s` interval, `start_period 60s`
-   - **Currently Configured Value**: `wget --spider .../ping`, interval `5s`, timeout `5s`, retries `10`, start_period `20s`
-   - **Outcome / System Impact**: **Verified `/ping` returns `Ok.`** and `wget` exists in the image. 50s of tolerance after the start period.
-   - **Why & When to Configure It**: `start_period` is what absorbs the two-phase startup; without it the probe fails against the temporary server.
-   - **Scaling & Troubleshooting**: Unlike several peers in this stack this check ends in `|| exit 1` and **can** genuinely fail. Move to `/replicas_status` once replication exists.
-
----
-
-4. **Parameter**: `ulimits.nofile`
-   - **Definition**: Per-process file-descriptor ceiling.
-   - **Expected Values**: ClickHouse recommendation `262144` | Docker default `1024`
-   - **Currently Configured Value**: soft and hard `262144` (in `docker-compose.yml`)
-   - **Outcome / System Impact**: Supplies the headroom that lets `max_connections` sit at 512 safely.
-   - **Why & When to Configure It**: Each column of each MergeTree part is a file; each client socket is a descriptor.
-   - **Scaling & Troubleshooting**: Symptom of exhaustion is `Too many open files`. Check `SELECT value FROM system.asynchronous_metrics WHERE metric='OSOpenFiles'`.
-
----
 ## 7. Network, Protocol & Endpoint Configuration
 
 ### 7.1 Endpoint Configuration & Python Client Code
@@ -1354,45 +1242,17 @@ graph LR
 
 ### 7.3 Endpoint Detailed Configuration Breakdown
 
-1. **Parameter**: `listen_host`
-   - **Definition**: Interface address the server binds all listeners to.
-   - **Expected Values**: Containerised: `0.0.0.0` | Dual-stack: `::` | Default: `localhost`
-   - **Currently Configured Value**: `0.0.0.0` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: Binds all interfaces **inside the container network namespace** only.
-   - **Why & When to Configure It**: The default binds loopback, which makes ClickHouse unreachable from Grafana and every other container.
-   - **Scaling & Troubleshooting**: Do not attempt access restriction here — that belongs in the user `<networks>` element and at the network layer. Verify with `ss -ltn`.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `listen_host` | `0.0.0.0` | Binds all interfaces inside the namespace; default is loopback only | §1.1 item 16 |
+| `http_port` / `tcp_port` | `8123` / `9000` | Grafana and healthcheck use HTTP; native serves clients | §1.1 item 17 |
+| `default_database` | `llm_telemetry_analytics` | Resolves unqualified queries; must track `CLICKHOUSE_DB` | §1.1 item 18 |
+| `ports` (compose) | `31421:8123`, `31422:9000` | Publishes only the two protocols in use; 9004/9005/9009 stay internal | §1.1 item 27 |
 
 ---
 
-2. **Parameter**: `http_port` & `tcp_port`
-   - **Definition**: Listener ports for the HTTP and native client protocols.
-   - **Expected Values**: `8123` / `9000` | TLS: add `https_port 8443` / `tcp_port_secure 9440`
-   - **Currently Configured Value**: `8123` and `9000` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: No behaviour change — both match the measured defaults.
-   - **Why & When to Configure It**: Declared for explicitness so the compose port mapping has a greppable counterpart.
-   - **Scaling & Troubleshooting**: Changing either requires updating the compose port map **and** the healthcheck URL in lockstep.
-
----
-
-3. **Parameter**: `default_database`
-   - **Definition**: Database resolved for unqualified queries.
-   - **Expected Values**: This stack: `llm_telemetry_analytics` | Default: `default`
-   - **Currently Configured Value**: `llm_telemetry_analytics` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: **Verified:** `SELECT currentDatabase()` returns `llm_telemetry_analytics`.
-   - **Why & When to Configure It**: Lets Grafana panels and writers omit `USE` and the database prefix.
-   - **Scaling & Troubleshooting**: Must stay in sync with `CLICKHOUSE_DB`, which is what *creates* the database. If they diverge, every unqualified query fails with `UNKNOWN_DATABASE`.
-
----
-
-4. **Parameter**: `ports` (compose publication)
-   - **Definition**: Host-to-container publication of the two client protocols.
-   - **Expected Values**: Dev: `31421:8123`, `31422:9000` | Prod: unpublished, routed via Traefik
-   - **Currently Configured Value**: `31421:8123` and `31422:9000` (in `docker-compose.yml`)
-   - **Outcome / System Impact**: Grafana uses the container network; publication exists for local tooling.
-   - **Why & When to Configure It**: Only the two protocols actually in use are published.
-   - **Scaling & Troubleshooting**: **Verified the server also listens on 9004, 9005 and 9009.** Publishing 9004/9005 would expose two further wire protocols to the host.
-
----
 ## 8. System Log Retention & Physical Storage Management
 
 ### 8.1 Retention Configuration & Python TTL Verification Code
@@ -1550,45 +1410,17 @@ graph TB
 
 ### 8.4 Retention Detailed Configuration Breakdown
 
-1. **Parameter**: `<ttl>` on six system log tables
-   - **Definition**: MergeTree `TTL ... DELETE` dropping expired partitions of ClickHouse self-telemetry.
-   - **Expected Values**: Dev: `3 DAY` high-frequency / `7 DAY` query-shaped | Prod: `7 DAY` / `30 DAY`
-   - **Currently Configured Value**: `7 DAY` on `query_log` and `part_log`; `3 DAY` on `trace_log`, `metric_log`, `asynchronous_metric_log`, `query_thread_log`
-   - **Outcome / System Impact**: Bounds self-telemetry growth to a rolling window. All seven verified present in `system.tables.engine_full`.
-   - **Why & When to Configure It**: Measured default is none, except `query_log` at 30 days. `metric_log` alone writes ~86,400 wide rows/day on an idle server.
-   - **Scaling & Troubleshooting**: **Applies at table creation only** — see §10.2 for retroactive `ALTER`. Shortening the window shortens the forensic window: a week-old incident will have no `trace_log` rows.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `<ttl>` on six system log tables | 3 or 7 days | Bounds self-telemetry growth in `clickhouse_data` | §1.1 item 19 |
+| `<engine>` with inline `ttl` (`opentelemetry_span_log`) | `finish_date + 7 DAY` | The one table where a sibling `<ttl>` refuses to boot | §1.1 item 20 |
+| `<logger>` `<size>` / `<count>` | `100M` x `3` | Bounds the in-container file log the compose driver never sees | §1.1 item 21 |
+| `flush_interval_milliseconds` / `collect_interval_milliseconds` | `7500` / `1000` | Flush cadence and `metric_log` row rate | §1.1 items 23-24 |
 
 ---
 
-2. **Parameter**: `<engine>` with inline `ttl` for `opentelemetry_span_log`
-   - **Definition**: Full table definition with retention expressed inside the engine clause.
-   - **Expected Values**: Dev: `7 DAY` | Prod: `30 DAY`
-   - **Currently Configured Value**: `ttl finish_date + INTERVAL 7 DAY DELETE` inside the engine spec
-   - **Outcome / System Impact**: Bounds the platform's own span telemetry, matched to `query_log` so the two correlate.
-   - **Why & When to Configure It**: **Get this wrong and the server does not boot** — `Code: 36 BAD_ARGUMENTS` on metadata load.
-   - **Scaling & Troubleshooting**: Keep `partition by` and `order by` exactly as shipped; change only the interval. Retroactive form keys off `finish_date`, **not** `event_date`.
-
----
-
-3. **Parameter**: `<logger>` `<size>` & `<count>`
-   - **Definition**: Rotation size and file count for the in-container file log.
-   - **Expected Values**: Dev: `100M` x `3` | Prod: `200M` x `5` | Default: `1000M` x `10`
-   - **Currently Configured Value**: `100M` and `3` (in `config/clickhouse/config.d/custom.xml`)
-   - **Outcome / System Impact**: Caps a previously unbounded ~10 GB consumer at 300 MB.
-   - **Why & When to Configure It**: `/var/log/clickhouse-server/` is **not a volume** and is **not** covered by the compose `x-logging` block, which bounds stdout only.
-   - **Scaling & Troubleshooting**: Bounded rather than disabled — it is the only record of a startup crash before console attachment, and is how the `<engine>`/`<ttl>` defect was diagnosed.
-
----
-
-4. **Parameter**: `flush_interval_milliseconds` & `collect_interval_milliseconds`
-   - **Definition**: How often buffered log rows are flushed, and how often `metric_log` samples a snapshot row.
-   - **Expected Values**: `7500` / `1000` standard | `30000` / `5000` low-overhead
-   - **Currently Configured Value**: `7500` on all seven tables; `collect_interval_milliseconds` `1000`
-   - **Outcome / System Impact**: Normalises the odd `7000` default on `asynchronous_metric_log`; bounds crash-time loss of self-telemetry.
-   - **Why & When to Configure It**: A system-log node must carry its full definition when overridden, so these are declared alongside each `<ttl>`.
-   - **Scaling & Troubleshooting**: Lowering the flush interval produces more frequent small parts and more merge pressure — a contributor to `TOO_MANY_PARTS`. Raising `collect_interval_milliseconds` is the right lever if `metric_log` disk growth persists despite a short TTL.
-
----
 ## 9. MergeTree Storage, Granules, Marks & Merge Mechanics
 
 Every memory and retention parameter in this guide ultimately governs MergeTree behaviour. This section explains the storage engine those parameters act on.
@@ -1723,35 +1555,16 @@ graph TB
 
 ### 9.4 MergeTree Detailed Configuration Breakdown
 
-1. **Parameter**: `background_pool_size`
-   - **Definition**: Threads performing background merges and mutations for MergeTree tables.
-   - **Expected Values**: Default (recommended): `16` | Large ingest clusters: `32`+
-   - **Currently Configured Value**: *Not set* — inherits `16` (reviewed, deliberately unchanged)
-   - **Outcome / System Impact**: Merges keep part count down **and** are what actually applies `TTL DELETE`.
-   - **Why & When to Configure It**: Evaluated for reduction on this 4-core host and **rejected** — merges are I/O-bound and the pool is demand-created.
-   - **Scaling & Troubleshooting**: Starving it risks `TOO_MANY_PARTS` *and* silently stalls retention. **Can only be increased at runtime; lowering needs a restart.** Monitor `BackgroundMergesAndMutationsPoolTask` in `system.metrics`.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `background_pool_size` | `16` (inherited) | Merge threads — and what actually applies TTL retention | §1.1 item 35 |
+| `index_granularity` | `8192` (inherited) | Rows per granule, so it sets how many marks the cache must hold | — |
+| `parts_to_delay_insert` / `parts_to_throw_insert` | `150` / `300` (inherited) | The thresholds behind `TOO_MANY_PARTS` | — |
 
 ---
 
-2. **Parameter**: `index_granularity` (per-table MergeTree setting)
-   - **Definition**: Rows per granule — the unit a query can skip, and the thing a mark points at.
-   - **Expected Values**: Default: `8192` | Very wide rows: `4096` | Very narrow rows: `16384`
-   - **Currently Configured Value**: *Not set* — inherits `8192`
-   - **Outcome / System Impact**: Directly determines mark count, and therefore how much `mark_cache_size` must hold.
-   - **Why & When to Configure It**: Lowering it makes skipping finer-grained but multiplies mark count and mark-cache pressure.
-   - **Scaling & Troubleshooting**: Leave at the default unless profiling shows granule-level over-scanning. Any change interacts directly with parameter 4 in §3.4.
-
----
-
-3. **Parameter**: `parts_to_delay_insert` / `parts_to_throw_insert`
-   - **Definition**: Active-part thresholds at which ClickHouse throttles, then rejects, inserts.
-   - **Expected Values**: Defaults: `150` / `300`
-   - **Currently Configured Value**: *Not set* — inherits defaults
-   - **Outcome / System Impact**: The mechanism behind the `TOO_MANY_PARTS` error.
-   - **Why & When to Configure It**: Raising them hides an ingest-batching problem rather than fixing it.
-   - **Scaling & Troubleshooting**: The correct fix is **fewer, larger INSERTs** — not raising these, and not shrinking the merge pool. Diagnose with the part-count query in §9.1.
-
----
 ## 10. Native ClickHouse Emergency CLI Commands & Incident Runbooks
 
 ### 10.1 Standard Verification Block
