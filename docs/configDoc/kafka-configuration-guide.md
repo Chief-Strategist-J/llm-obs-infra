@@ -2503,16 +2503,32 @@ docker exec -it llmobs-kafka-broker kafka-configs.sh \
 
 ```mermaid
 graph TD
-    subgraph QuotaArchitecture ["Kafka Quota Enforcement Architecture"]
-        ClientReq["Client Produce/Fetch Request"] --> ReqHandler["Request Handler Thread"]
-        ReqHandler --> QuotaMgr["ClientQuotaManager"]
-        QuotaMgr --> LookupQuota["Lookup Quota: User to Client ID to Default"]
-        LookupQuota --> CheckRate{"Current Rate Exceeds Quota?"}
-        CheckRate -->|No| ProcessNormal["Process Request Normally"]
-        CheckRate -->|Yes| CalcThrottle["Calculate Throttle Time"]
-        CalcThrottle --> ThrottleResp["Return ThrottleTimeMs in Response"]
-        ThrottleResp --> ClientDelay["Client Delays Next Request by ThrottleTimeMs"]
+    subgraph IngressStage ["Request Ingress"]
+        ClientReq["Client Produce or Fetch Request"]
+        ReqHandler["Request Handler Thread"]
+        QuotaMgr["ClientQuotaManager"]
+        ClientReq --> ReqHandler
+        ReqHandler --> QuotaMgr
     end
+
+    subgraph EvaluationStage ["Quota Rate Evaluation"]
+        LookupQuota["Lookup Quota: User to Client ID to Default"]
+        CheckRate{"Current Rate Exceeds Quota?"}
+        LookupQuota --> CheckRate
+    end
+
+    subgraph OutcomeStage ["Enforcement and Response"]
+        ProcessNormal["Process Request Normally"]
+        CalcThrottle["Calculate Throttle Time"]
+        ThrottleResp["Return ThrottleTimeMs in Response"]
+        ClientDelay["Client Delays Next Request by ThrottleTimeMs"]
+        CalcThrottle --> ThrottleResp
+        ThrottleResp --> ClientDelay
+    end
+
+    QuotaMgr --> LookupQuota
+    CheckRate -->|No| ProcessNormal
+    CheckRate -->|Yes| CalcThrottle
 
     style ClientReq fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style ReqHandler fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -2530,39 +2546,49 @@ graph TD
 ### 15.3 Token Bucket Rate Limiting Mechanics Low-Level Design (LLD)
 
 ```mermaid
-graph TB
-    subgraph TokenBucket ["Token Bucket Rate Limiter Mechanics"]
-        Config["Quota Config: producer_byte_rate = 10 MB/s"]
-        Config --> Bucket["Token Bucket (Capacity = 10 MB)"]
-
-        Bucket --> RefillRate["Refill Rate: 10 MB per second"]
-        Bucket --> CurrentTokens["Current Available Tokens"]
-
-        ProduceReq["Incoming Produce Request (Size = 2 MB)"] --> CheckTokens{"Tokens GE Request Size?"}
-        CheckTokens -->|Yes: 10MB GE 2MB| ConsumeTokens["Consume 2 MB Tokens (Remaining: 8 MB)"]
-        ConsumeTokens --> ProcessReq["Process Request Immediately"]
-
-        CheckTokens -->|No: 1MB LT 2MB| CalcDelay["Deficit = 2MB - 1MB = 1MB"]
-        CalcDelay --> ThrottleTime["Throttle = Deficit / Rate = 1MB / 10MB/s = 100ms"]
-        ThrottleTime --> SendThrottle["Response: throttle_time_ms = 100"]
-
-        WindowSample["Measurement Window: quota.window.size.seconds = 1s"]
-        WindowCount["Samples Per Window: quota.window.num = 11"]
+graph TD
+    subgraph BucketConfig ["Token Bucket State and Refill"]
+        BucketInit["Token Bucket - Capacity: 10 MB"]
+        Refill["Continuous Refill Rate: 10 MB per second"]
+        WindowDef["Window: 11 samples over 11 seconds"]
+        Refill --> BucketInit
+        WindowDef --> BucketInit
     end
 
-    style Config fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
-    style Bucket fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
-    style RefillRate fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style CurrentTokens fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    subgraph RequestEvaluation ["Produce Request Evaluation"]
+        ProduceReq["Incoming Produce Request - Size: 2 MB"]
+        CheckTokens{"Tokens GE Request Size?"}
+        BucketInit --> CheckTokens
+        ProduceReq --> CheckTokens
+    end
+
+    subgraph TokenOutcome ["Throttle Decision and Execution"]
+        ConsumeTokens["Consume 2 MB Tokens - Remaining: 8 MB"]
+        ProcessReq["Process Request Immediately"]
+        CalcDelay["Deficit: 2 MB minus 1 MB = 1 MB"]
+        ThrottleTime["Throttle Delay: 100 ms"]
+        SendThrottle["Response with throttle_time_ms = 100"]
+
+        CheckTokens -->|Yes| ConsumeTokens
+        ConsumeTokens --> ProcessReq
+
+        CheckTokens -->|No| CalcDelay
+        CalcDelay --> ThrottleTime
+        ThrottleTime --> SendThrottle
+    end
+
+    style BucketInit fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Refill fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style WindowDef fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+
     style ProduceReq fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style CheckTokens fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+
     style ConsumeTokens fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style ProcessReq fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style CalcDelay fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
     style ThrottleTime fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
     style SendThrottle fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
-    style WindowSample fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style WindowCount fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
 ```
 
 ---
