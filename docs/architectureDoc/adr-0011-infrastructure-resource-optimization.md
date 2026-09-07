@@ -79,7 +79,10 @@ When `KAFKA_HEAP_OPTS` is absent, `kafka-server-start.sh` forces its own default
 
 ### Decision 2: Fix ClickHouse Mark Cache (5 GiB Default Exceeds 4 GiB Container)
 
-**Status:** Accepted
+**Status:** ~~Accepted~~ — **SUPERSEDED by [ADR-0012](adr-0012-clickhouse-configuration.md)**
+
+> The remediation is correct but the stated mechanism is not, and the proposal is incomplete
+> (the image also ships a 2 GiB `uncompressed_cache_size`). Implement ADR-0012 §4.4 instead.
 
 **Context:**
 ClickHouse's `mark_cache_size` defaults to **5 GiB (5,368,709,120 bytes)**. The current container memory limit is `4096M`. The mark cache ceiling **exceeds the container ceiling**. ClickHouse silently over-allocates marks beyond the cgroup boundary, relying on the Linux page cache as an overflow buffer. Under any moderate query load, the Linux OOM Killer terminates the container (`Exit 137`).
@@ -188,7 +191,11 @@ offsets.topic.num.partitions=3    # Reduce from 50 (each creates its own segment
 
 ### Decision 7: Reduce ClickHouse Concurrency Limits and Add Per-Query Memory Cap
 
-**Status:** Accepted
+**Status:** ~~Accepted~~ — **SUPERSEDED by [ADR-0012](adr-0012-clickhouse-configuration.md)**
+
+> Do **not** create `users.d/dev-limits.xml`: `users.d/override.xml` already sets
+> `max_memory_usage=2147483648`. `max_concurrent_queries=16` without `queue_max_wait_ms`
+> turns burst load into immediate errors. Implement ADR-0012 §5 instead.
 
 **Context:**
 `max_connections=1024` and `max_concurrent_queries=100`. In ClickHouse, a single query can spawn parallel threads across all available CPU cores and allocate hundreds of megabytes to gigabytes. 100 concurrent queries on a 4-CPU machine means each query competes for the same 4 cores with potential for extreme memory amplification.
@@ -325,13 +332,13 @@ A 4 GB Docker container is already an aggressive constraint for ClickHouse on a 
 | # | Change | File(s) Affected | Status |
 |---|---|---|---|
 | 1 | Fix `KAFKA_JVM_PERFORMANCE_OPTS` → `KAFKA_HEAP_OPTS` | `docker-compose.yml` | ⬜ Pending |
-| 2 | Add ClickHouse `mark_cache_size=512MiB` | `config/clickhouse/config.d/custom.xml` | ⬜ Pending |
+| 2 | Add ClickHouse `mark_cache_size=512MiB` | `config/clickhouse/config.d/custom.xml` | ✅ Superseded by ADR-0012 |
 | 3 | Fix OTel Collector container limit + `limit_mib` ratio | `docker-compose.yml`, `config/otel-collector/otel-collector-config.yaml` | ⬜ Pending |
 | 4 | Add Docker limits to Temporal, Tempo, Grafana, Traefik, Registry | `docker-compose.yml` | ⬜ Pending |
 | 5 | Add Redis Docker container limit (512M) | `docker-compose.yml` | ⬜ Pending |
 | 6 | Explicit Redis AOF settings + `maxmemory-clients` | `config/redis/redis.conf` | ⬜ Pending |
 | 7 | Kafka log retention + segment size tuning | `config/kafka/server.properties` | ⬜ Pending |
-| 8 | ClickHouse concurrency limits + create `dev-limits.xml` | `config/clickhouse/config.d/custom.xml`, new `config/clickhouse/users.d/dev-limits.xml` | ⬜ Pending |
+| 8 | ClickHouse concurrency limits (do **not** create `dev-limits.xml`) | `config/clickhouse/config.d/custom.xml`, `config/clickhouse/users.d/override.xml` | ✅ Superseded by ADR-0012 |
 | 9 | AlloyDB `max_connections=60`, `work_mem=8MB` | `config/alloydb/postgresql.conf` | ⬜ Pending |
 | 10 | Docker log caps: `default 50m→10m`, `audit 100m→20m` | `docker-compose.yml` | ⬜ Pending |
 

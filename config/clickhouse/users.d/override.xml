@@ -1,8 +1,59 @@
 <clickhouse>
+    <!-- =================================================================
+         ClickHouse `default` PROFILE — per-query resource caps.
+         Server-wide ceilings live in config.d/custom.xml; this file bounds
+         what any SINGLE query (or all queries by one user) may consume.
+
+         Reference for every setting below — default value, example values,
+         what it means, what it does here, and its trade-off:
+             docs/configDoc/clickhouse-configuration-guide.md
+             (master list in section 1; deep-dive in section 5)
+         Decision record:
+             docs/architectureDoc/adr-0012-clickhouse-configuration.md
+
+         This file is the SOLE owner of the `default` profile. Do not add a
+         second users.d file defining <profiles><default> — amend this one.
+         ================================================================= -->
     <profiles>
         <default>
+            <!-- ── Per-Query Memory (U-1, U-2) ─────────────────────── -->
+            <!-- One query may hold at most 2 GiB. With 16 concurrent
+                 slots the theoretical worst case exceeds the server
+                 ceiling, which is intentional: max_server_memory_usage
+                 (3.5 GiB) is the real backstop and throws MEMORY_LIMIT_
+                 EXCEEDED on the newest query rather than OOM-killing. -->
             <max_memory_usage>2147483648</max_memory_usage>
+
+            <!-- Legacy per-user aggregate cap. Superseded by
+                 max_server_memory_usage; retained because the image is
+                 unpinned (`:latest`) and it is harmless where obsolete. -->
             <max_memory_usage_for_all_queries>3221225472</max_memory_usage_for_all_queries>
+
+            <!-- ── Disk Spill (U-3, U-4) ───────────────────────────── -->
+            <!-- Set to half of max_memory_usage per ClickHouse guidance.
+                 Beyond this a GROUP BY / ORDER BY spills to /var/lib/
+                 clickhouse/tmp instead of throwing. Trades latency for
+                 completion — the correct trade on a 4 GiB container. -->
+            <max_bytes_before_external_group_by>1073741824</max_bytes_before_external_group_by>
+            <max_bytes_before_external_sort>1073741824</max_bytes_before_external_sort>
+
+            <!-- ── Admission Queue Behaviour (U-5) ─────────────────── -->
+            <!-- When all 16 concurrent-query slots are busy, wait up to
+                 3s for a slot, then fail fast with TOO_MANY_SIMULTANEOUS_
+                 QUERIES. Without this the client blocks indefinitely. -->
+            <queue_max_wait_ms>3000</queue_max_wait_ms>
+
+            <!-- ── Runaway Query Protection (U-6) ──────────────────── -->
+            <!-- A stuck query otherwise holds one of only 16 slots
+                 forever. 300s is far above any dashboard or ingest
+                 query while still bounding the worst case. -->
+            <max_execution_time>300</max_execution_time>
+
+            <!-- ── Caches (U-7) ────────────────────────────────────── -->
+            <!-- Explicitly off. This is the switch that actually governs
+                 the uncompressed cache; the OS page cache serves the same
+                 role without competing for the cgroup budget. -->
+            <use_uncompressed_cache>0</use_uncompressed_cache>
         </default>
     </profiles>
 </clickhouse>

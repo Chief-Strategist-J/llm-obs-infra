@@ -22,12 +22,14 @@ graph TD
     classDef arch fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
     classDef perf fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
     classDef sec fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef conf fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
 
     Root["Infrastructure Docs Gateway"]
 
     Root --> Arch["1. Architecture Docs (architectureDoc/)"]
     Root --> Perf["2. Performance Docs (performanceDoc/)"]
     Root --> Sec["3. Security Docs (securityDoc/)"]
+    Root --> Conf["4. Configuration Docs (configDoc/)"]
 
     Arch --> Arch1["System Architecture"]:::arch
     Arch --> Arch2["High-Level Design (HLD)"]:::arch
@@ -53,6 +55,9 @@ graph TD
     Sec --> Sec9["Threat Model Report"]:::sec
     Sec --> Sec10["Vulnerability Assessment"]:::sec
     Sec --> Sec11["Security Mandate ADR"]:::sec
+
+    Conf --> Conf1["Kafka Configuration Guide"]:::conf
+    Conf --> Conf2["ClickHouse Configuration Guide"]:::conf
 ```
 
 ---
@@ -101,6 +106,19 @@ graph TD
 | [audits/complete/independent-audit-adr-0006.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/audits/complete/independent-audit-adr-0006.md) | AUD-0006 — Architecture & resilience security audit report (17 findings, fully remediated). | Security Auditors, Architects & CISOps |
 | [audits/pending/independent-audit-infra-deployment-config.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/audits/pending/independent-audit-infra-deployment-config.md) | AUD-0007 — Critical implementation-level security audit of the deployed stack (39 findings). | Security Auditors, Architects & CISOs |
 | [audits/pending/remediation-plan-infra-deployment-config.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/audits/pending/remediation-plan-infra-deployment-config.md) | AUD-0007 phased technical remediation plan with per-finding patches and verification commands. | Infrastructure & Security Engineers |
+
+---
+
+### 4. Configuration Documentation (`docs/configDoc/`)
+
+Per-service configuration deep-dives: architecture (HLD/LLD), a breakdown of every tuned parameter,
+and a master summary matrix giving each parameter's default, example values, what it does, why it is
+set, its trade-off, and its measured impact.
+
+| Document | Description | Target Audience |
+|---|---|---|
+| [kafka-configuration-guide.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/configDoc/kafka-configuration-guide.md) | Broker, producer, consumer & topic architecture with JVM heap, retention, and segment tuning rationale. | Backend, DevOps & Platform Engineers |
+| [clickhouse-configuration-guide.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/configDoc/clickhouse-configuration-guide.md) | Memory & cache ceilings, query admission control, per-query governance, and system-log retention — validated on ClickHouse 26.8.2.7 under the 4096M cgroup. | Database Administrators, SREs & DevOps |
 
 ---
 

@@ -1,26 +1,143 @@
 <clickhouse>
+    <!-- =================================================================
+         ClickHouse SERVER configuration.
+
+         Reference for every directive below — default value, example
+         values, what it means, what it does here, and its trade-off:
+             docs/configDoc/clickhouse-configuration-guide.md
+             (master list in section 1; deep-dives in sections 3, 7, 8)
+         Decision record (why this approach, what was rejected):
+             docs/architectureDoc/adr-0012-clickhouse-configuration.md
+
+         Sized for the 4096M cgroup in docker-compose.yml. Change that
+         limit and C-4, C-6a and U-1 must be revisited together.
+
+         WARNING: config.d files MERGE into the image's shipped
+         config.xml, they do not replace it. See guide section 10.7.
+         ================================================================= -->
+
+    <!-- ── Network & Protocol ──────────────────────────────────────── -->
     <listen_host>0.0.0.0</listen_host>
     <http_port>8123</http_port>
     <tcp_port>9000</tcp_port>
 
-    <max_connections>1024</max_connections>
+    <!-- ── Admission Control (C-1..C-3) ────────────────────────────── -->
+    <!-- Socket ceiling. 512 sockets >> the 16 query slots below, so this
+         bounds handshake/idle-socket cost without ever being the limiter. -->
+    <max_connections>512</max_connections>
+
+    <!-- HTTP keep-alive. Deliberately long: Grafana and the OTel exporter
+         are pooled clients, so socket reuse beats socket churn here. -->
     <keep_alive_timeout>300</keep_alive_timeout>
-    <max_concurrent_queries>100</max_concurrent_queries>
+
+    <!-- THE memory-amplification control. Each query may fan out to
+         max_threads (= 4 cores) and hold up to max_memory_usage (2 GiB).
+         16 slots is the admission gate; overflow waits (queue_max_wait_ms)
+         instead of being admitted and OOM-killing the container. -->
+    <max_concurrent_queries>16</max_concurrent_queries>
 
     <default_database>llm_telemetry_analytics</default_database>
 
-    <!-- OpenTelemetry Internal Span Logging -->
+    <!-- ── Server Memory Protection (C-4, C-5) ─────────────────────── -->
+    <!-- Hard total-server ceiling: 3.5 GiB = 87.5% of the 4096M cgroup.
+         The 512 MiB gap absorbs allocator fragmentation and non-tracked
+         allocations so the tracker throws before the kernel OOM killer. -->
+    <max_server_memory_usage>3758096384</max_server_memory_usage>
+
+    <!-- Secondary guard. This is ALREADY the ClickHouse default (0.9) and
+         is declared only to pin it: ClickHouse reads the cgroup limit, so
+         it re-derives a ceiling if the container limit is ever lowered
+         below ~4 GiB without this file being updated. The effective
+         ceiling is the MINIMUM of this and the absolute value above. -->
+    <max_server_memory_usage_to_ram_ratio>0.9</max_server_memory_usage_to_ram_ratio>
+
+    <!-- ── Server Caches (C-6) ─────────────────────────────────────── -->
+    <!-- Default is 5 GiB, which EXCEEDS the 4096M container. Capped to
+         512 MiB (the documented floor is 500 MiB; it must never be 0). -->
+    <mark_cache_size>536870912</mark_cache_size>
+
+    <!-- The image ships uncompressed_cache_size=2 GiB (half the container).
+         It is only populated when use_uncompressed_cache=1, which the
+         default profile pins to 0 — but the ceiling is zeroed here too so
+         the exposure cannot be reintroduced by a per-query setting. -->
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+
+    <!-- ── Logger (C-7) ────────────────────────────────────────────── -->
+    <!-- console=true means Docker's json-file driver already captures
+         everything. The in-container file log defaults to 1000M x 10
+         (~10 GB) inside the writable layer; bounded to 300 MB total. -->
+    <logger>
+        <level>information</level>
+        <console>true</console>
+        <size>100M</size>
+        <count>3</count>
+    </logger>
+
+    <!-- ── System Log Retention (C-8) ──────────────────────────────── -->
+    <!-- Most system log tables ship with NO TTL and grow without bound
+         inside the clickhouse_data volume (query_log is the exception:
+         the image gives it 30 days, tightened to 7 below). Each table
+         below declares an explicit DELETE TTL. High-frequency tables
+         (trace/metric/asynchronous_metric/query_thread) get 3 days;
+         query-shaped tables that carry debugging value get 7. -->
+
+    <!-- opentelemetry_span_log is the ONE exception: the shipped config
+         defines an explicit <engine> for it (it has finish_date/finish_time_us
+         rather than event_date). ClickHouse rejects a sibling <ttl> when
+         <engine> is present (BAD_ARGUMENTS, code 36) and refuses to start,
+         so the retention clause must live INSIDE the engine spec. -->
     <opentelemetry_span_log>
+        <engine>
+            engine MergeTree
+            partition by toYYYYMM(finish_date)
+            order by (finish_date, finish_time_us)
+            ttl finish_date + INTERVAL 7 DAY DELETE
+        </engine>
         <database>system</database>
         <table>opentelemetry_span_log</table>
         <flush_interval_milliseconds>7500</flush_interval_milliseconds>
     </opentelemetry_span_log>
 
-    <!-- Server Memory Protection to align with Docker cgroups -->
-    <max_server_memory_usage>3758096384</max_server_memory_usage>
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </query_log>
 
-    <logger>
-        <level>information</level>
-        <console>true</console>
-    </logger>
+    <query_thread_log>
+        <database>system</database>
+        <table>query_thread_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+    </query_thread_log>
+
+    <part_log>
+        <database>system</database>
+        <table>part_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </part_log>
+
+    <trace_log>
+        <database>system</database>
+        <table>trace_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+    </trace_log>
+
+    <metric_log>
+        <database>system</database>
+        <table>metric_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <collect_interval_milliseconds>1000</collect_interval_milliseconds>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+    </metric_log>
+
+    <asynchronous_metric_log>
+        <database>system</database>
+        <table>asynchronous_metric_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+    </asynchronous_metric_log>
 </clickhouse>
