@@ -467,24 +467,30 @@ ClickHouse is the columnar analytics store terminating the telemetry pipeline. I
 
 ```mermaid
 graph TD
+    subgraph CHBoundary ["llmobs-clickhouse-analytics - cgroup 4096M"]
+        C1["ClickHouse Analytics DB"]
+        D1["Memory Tracker 3.5 GiB"]
+        D2["Mark Cache 512 MiB"]
+        D3["16 Query Slots"]
+        D4["Merge and Background Pools"]
+        E1["Linux OS Page Cache"]
+        F1["MergeTree Parts"]
+        F2["Temp Spill Files"]
+        C1 --> D1
+        C1 --> E1
+        D1 --> D2
+        D1 --> D3
+        D1 --> D4
+        E1 --> F1
+        D3 --> F2
+    end
+
     A1["Application SDKs"] -->|OTLP Spans| B1["llmobs-otel-collector"]
     A2["Traefik Access Logs"] -->|OTLP Traces| B1
     A3["Kafka Telemetry Topics"] -->|Batch Ingest| C1
-
-    B1 -->|PII-Redacted Spans| C1["llmobs-clickhouse Analytics DB"]
-
-    subgraph CHBoundary ["llmobs-clickhouse-analytics - cgroup 4096M"]
-        C1 --> D1["Memory Tracker - max_server_memory_usage 3.5 GiB"]
-        D1 --> D2["Mark Cache 512 MiB"]
-        D1 --> D3["16 Concurrent Query Slots"]
-        D1 --> D4["Merge and Background Pools"]
-        C1 --> E1["Linux OS Page Cache"]
-        E1 -->|Compressed Column Reads| F1["MergeTree Parts in /var/lib/clickhouse"]
-        D3 -->|Spill past 1 GiB| F2["Temp Spill Files in /var/lib/clickhouse/tmp"]
-    end
-
+    B1 -->|PII-Redacted Spans| C1
     F1 -->|Aggregate Queries| G1["Grafana Portal"]
-    C1 -->|Self-Telemetry| H1["system log tables - TTL 3 to 7 days"]
+    C1 -->|Self-Telemetry| H1["system log tables TTL 3 to 7 days"]
 
     style A1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style A2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -494,12 +500,12 @@ graph TD
     style D1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
     style D3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
     style D4 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style D2 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style E1 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
     style F1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style F2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style H1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style G1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-    style E1 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
-    style D2 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
 ```
 
 ---
