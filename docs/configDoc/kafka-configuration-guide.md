@@ -8,11 +8,11 @@ In the llm-obs-infra architecture, Apache Kafka serves as an asynchronous, distr
 
 ```mermaid
 graph TD
-    A1["OpenTelemetry Collectors"] -->|Publish Spans and Metrics| B1["Traefik Load Balancer"]
-    A2["Traefik Access Logs"] -->|Publish Access Traces| B1
-    A3["Application SDKs"] -->|Publish App Metrics| B1
+    A1["OpenTelemetry Collectors"] -->|Stream Telemetry| B1["Traefik Load Balancer"]
+    A2["Traefik Access Logs"] -->|Stream Telemetry| B1
+    A3["Application SDKs"] -->|Stream Telemetry| B1
 
-    B1 -->|TCP Client Ingest| C1["llmobs-kafka Broker"]
+    B1 -->|Publish Spans and Metrics| C1["llmobs-kafka Broker"]
 
     subgraph Kafka Cluster Boundary ["llmobs-kafka Broker (cgroup 2048M Limit)"]
         C1 --> D1["JVM Heap (-Xmx1024M)"]
@@ -176,7 +176,7 @@ graph TD
 
     subgraph Background Processing ["Background I/O Thread"]
         RecordAccumulator --> SenderThread["Sender Thread"]
-        SenderThread --> SocketChannel["Network Client & SocketChannel"]
+        SenderThread --> SocketChannel["Network Client and SocketChannel"]
     end
 
     SocketChannel -->|TCP Produce Request| KafkaBroker["llmobs-kafka Broker"]
@@ -196,27 +196,34 @@ graph TB
         BatchP2["Partition 2 Batch<br/>(batch.size = 16KB)"]
     end
 
-    subgraph Batch Trigger Conditions ["Batch Trigger Logic"]
+    subgraph Batch Trigger Logic ["Batch Trigger Conditions"]
         Trigger1["Condition 1: Batch Size Full (16 KB)"]
         Trigger2["Condition 2: Linger Time Expired (linger.ms = 10ms)"]
     end
 
-    BatchP0 & BatchP1 & BatchP2 --> Trigger1
-    BatchP0 & BatchP1 & BatchP2 --> Trigger2
+    BatchP0 --> Trigger1
+    BatchP1 --> Trigger1
+    BatchP2 --> Trigger1
+    BatchP0 --> Trigger2
+    BatchP1 --> Trigger2
+    BatchP2 --> Trigger2
 
-    Trigger1 & Trigger2 --> SenderThread["Sender Thread"]
+    Trigger1 --> SenderThread["Sender Thread"]
+    Trigger2 --> SenderThread
 
     subgraph In-Flight Network Queue ["In-Flight Queue (max.in.flight.requests = 5)"]
         Req1["In-Flight Produce Request 1"]
         Req2["In-Flight Produce Request 2"]
     end
 
-    SenderThread --> Req1 & Req2
-    Req1 & Req2 -->|Produce Request| BrokerNode["Broker Leader Replica"]
+    SenderThread --> Req1
+    SenderThread --> Req2
+    Req1 -->|Produce Request| BrokerNode["Broker Leader Replica"]
+    Req2 -->|Produce Request| BrokerNode
 
     BrokerNode -->|acks=all Response| AckHandler["ACK / Retry Handler"]
     AckHandler -->|Success| Complete["Complete RecordFuture"]
-    AckHandler -.->|Error & Retries > 0| RetryQueue["Retry Backoff (retry.backoff.ms = 100ms)"]
+    AckHandler -.->|Error and Retries Available| RetryQueue["Retry Backoff (retry.backoff.ms = 100ms)"]
     RetryQueue --> SenderThread
 ```
 
@@ -291,7 +298,9 @@ graph TD
     C2 -->|Fetch & Process| P1
     C3 -->|Fetch & Process| P2
 
-    C1 & C2 & C3 -->|Heartbeat & Offset Commit| Coord
+    C1 -->|Heartbeat and Offset Commit| Coord
+    C2 -->|Heartbeat and Offset Commit| Coord
+    C3 -->|Heartbeat and Offset Commit| Coord
     Coord -->|Persist Offsets| OffsetTopic
 ```
 
@@ -315,13 +324,14 @@ graph TB
         AppProcess --> CommitCheck{"enable.auto.commit = false?"}
         CommitCheck -- Yes --> ManualCommit["commitSync() / commitAsync()"]
         CommitCheck -- No --> AutoCommit["Auto Commit (every 5000ms)"]
-        ManualCommit & AutoCommit --> OffsetWrite["Write to __consumer_offsets"]
+        ManualCommit --> OffsetWrite["Write to __consumer_offsets"]
+        AutoCommit --> OffsetWrite
     end
 
     subgraph Heartbeat & Liveness Thread ["Background Heartbeat Thread"]
         HBThread["Heartbeat Thread (heartbeat.interval.ms = 3000)"] -->|Send Heartbeat| CoordNode["Group Coordinator"]
         CoordNode -->|Liveness Valid| OK["Keep Partition Assignment"]
-        CoordNode -.->|Session Timeout (> 45s)| Dead["Mark Consumer Dead -> Trigger Rebalance"]
+        CoordNode -.->|Session Timeout Exceeded 45s| Dead["Mark Consumer Dead and Trigger Rebalance"]
     end
 ```
 
@@ -399,7 +409,7 @@ graph TB
     subgraph Partition Directory Engine ["Partition Engine (/var/lib/kafka/data/llmobs-spans-0/)"]
         WriteOp["Produce Record Appended"] --> ActiveSegment["Active Segment: 00000000000000000200.log<br/>(Currently Appending Write)"]
 
-        ActiveSegment --> RollCondition{"Segment Full (>100MB)<br/>OR Time Expired (>2h)?"}
+        ActiveSegment --> RollCondition{"Segment Full 100MB or Time Expired 2h?"}
         RollCondition -- Yes --> CloseSegment["Close Active Segment -> Mark INACTIVE"]
         CloseSegment --> OpenNew["Open New Active Segment (.log)"]
         RollCondition -- No --> KeepWriting["Continue Appending Writes"]
@@ -412,7 +422,7 @@ graph TB
         CloseSegment --> IndexLookups
 
         subgraph Log Retention Cleaner ["Log Retention Cleaner Thread"]
-            CleanerScan["Retention Scan (Every 60 Seconds)"] --> RetentionCheck{"Closed Segment Age > 24 Hours?"}
+            CleanerScan["Retention Scan (Every 60 Seconds)"] --> RetentionCheck{"Closed Segment Age Exceeds 24 Hours?"}
             RetentionCheck -- Yes --> UnlinkFile["Unlink and Delete Segment Files"]
             RetentionCheck -- No --> RetainSegment["Retain File on Disk"]
         end
@@ -447,6 +457,17 @@ graph TB
 | **1. What Is This Parameter?** | Duration in hours that closed segment files are retained on disk before physical deletion. |
 | **2. Why & When to Use It** | Kafka is an intermediate buffer. Telemetry data is consumed almost immediately by ClickHouse. Retaining 7 days duplicates data and consumes host storage. |
 | **3. Impact on Current System** | Reclaims ~35 GB of disk space on `/dev/sda2` by deleting 1-day-old segments. |
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `log.roll.hours` |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 17) |
+| **Configured Value** | `2` (2 Hours) |
+| **Apache Kafka Default** | `168` (168 Hours / 7 Days) |
+| **Criticality Rating** | HIGH |
+| **1. What Is This Parameter?** | Maximum time window after which an active segment is forcibly closed, even if segment size is less than 100 MB. |
+| **2. Why & When to Use It** | Low-throughput topics take weeks to write 100 MB. Forced rolls every 2 hours guarantee active segments close and become eligible for 24-hour deletion. |
+| **3. Impact on Current System** | Eliminates storage leaks on dormant or low-volume topics. |
 
 ---
 
