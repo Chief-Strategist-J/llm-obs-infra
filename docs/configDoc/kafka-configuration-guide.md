@@ -136,29 +136,37 @@ graph TB
 
 ### 3.3 Broker Detailed Configuration Breakdown
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+#### 3.3.1 `KAFKA_HEAP_OPTS` — JVM Heap Memory Sizing
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `KAFKA_HEAP_OPTS` |
-| **File Location & Target** | [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) (Line 115) & [`docker-compose.prod.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.prod.yml) (Line 12) |
-| **Configured Value** | `-Xms512m -Xmx1024m` *(Dev)* \| `-Xms1024m -Xmx2048m` *(Prod)* |
+| **Target Location** | [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) (Line 115) & [`docker-compose.prod.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.prod.yml) (Line 12) |
+| **Currently Configured Value** | `-Xms512m -Xmx1024m` *(Dev/Base)* \| `-Xms1024m -Xmx2048m` *(Prod)* |
 | **Apache Kafka Default** | `-Xms1G -Xmx1G` |
+| **Expected / Recommended Values** | Base Dev: `-Xms512m -Xmx1024m`<br/>Small Prod: `-Xms1024m -Xmx2048m`<br/>High-Throughput Prod: `-Xms4096m -Xmx4096m` |
 | **Criticality Rating** | CRITICAL |
-| **1. What Is This Parameter?** | Sets initial (`-Xms`) and maximum (`-Xmx`) Java heap bounds for broker metadata, request queues, and connection objects. |
-| **2. Why & When to Use It** | Prevents JVM memory allocation from exceeding host physical RAM limits and fixes environment flag parsing bugs. |
-| **3. Impact on Current System** | Keeps JVM heap bounded to 1024MB; leaves 1024MB off-heap headroom for Linux OS Page Cache and socket buffers. |
-| **4. How & Why to Scale / Increase** | Increase when active client connections exceed 1,000 or payload throughput exceeds 20 MB/sec. Formula: `Container Limit = JVM Heap + 1024MB`. |
+| **Definition** | Controls the initial (`-Xms`) and maximum (`-Xmx`) physical memory allocated strictly to Java Virtual Machine (JVM) heap objects (broker metadata, active request queues, partition offset indexes, consumer group coordinator state). |
+| **Why & When to Configure It** | **Why Configure It**: Fixes environment variable parsing bugs in `kafka-run-class.sh` launcher scripts and keeps Java memory strictly bounded to prevent host RAM starvation.<br/>**When to Configure**: Must be set on all containerized Kafka brokers. |
+| **Outcome / System Impact** | **RAM Outcome**: Restricts JVM heap to 1024MB max, leaving 1024MB off-heap headroom for Linux OS Page Cache and socket buffers.<br/>**GC Outcome**: Keeps G1GC collection pauses under 50ms on 4 CPU cores. |
+| **Scaling & Troubleshooting** | **Monitoring Metrics**: `jvm_gc_pause_seconds` > 0.5s or error `java.lang.OutOfMemoryError: Java heap space`.<br/>**Scaling Rule**: `Container Limit = JVM Heap (-Xmx) + 1024MB`. |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 3.3.2 `deploy.resources.limits.memory` — Docker Container Memory Ceiling
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `deploy.resources.limits.memory` & `reservations.memory` |
-| **File Location & Target** | [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) (Lines 94-99) |
-| **Configured Value** | Limit: `2048M` \| Reservation: `512M` |
+| **Target Location** | [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) (Lines 94-99) |
+| **Currently Configured Value** | Limit: `2048M` \| Reservation: `512M` |
 | **Apache Kafka Default** | Unbounded (`None`) |
+| **Expected / Recommended Values** | Base Dev: `2048M`<br/>Small Prod: `4096M`<br/>High-Throughput Prod: `8192M` |
 | **Criticality Rating** | CRITICAL |
-| **1. What Is This Parameter?** | Hard Linux kernel `cgroups` memory boundary around the broker container process. |
-| **2. Why & When to Use It** | Protects the host (15 GB RAM) from container memory starvation and Out-Of-Memory (OOM) crashes. |
-| **3. Impact on Current System** | Limits total container RAM to 2048MB, ensuring ClickHouse (`4096M`) and AlloyDB (`2048M`) remain stable. |
-| **4. How & Why to Scale / Increase** | Increase alongside JVM Heap scaling. Maintain at least 1 GB off-heap headroom above `-Xmx`. |
+| **Definition** | Establishes hard Linux kernel `cgroups` memory boundaries around the Kafka container process. |
+| **Why & When to Configure It** | **Why Configure It**: Prevents a single run-away container from consuming all host RAM and crashing adjacent services.<br/>**When to Configure**: Essential on shared multi-container hosts. |
+| **Outcome / System Impact** | **Host Protection**: Guarantees Kafka cannot exceed 2 GB of physical host RAM.<br/>**Coexistence**: Preserves guaranteed memory headroom for ClickHouse (`4096M`) and AlloyDB (`2048M`). |
+| **Scaling & Troubleshooting** | **Monitoring Metrics**: Container status `Exit 137` in `docker ps -a` or `dmesg \| grep -i oom`.<br/>**Scaling Rule**: `Container Limit = JVM Heap (-Xmx) + 1024M` (minimum 1 GB off-heap buffer). |
 
 ---
 
@@ -231,41 +239,54 @@ graph TB
 
 ### 4.3 Producer Detailed Configuration Breakdown
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+#### 4.3.1 `acks` / `KAFKA_ACKS` — Producer Acknowledgment Level
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `acks` / `KAFKA_ACKS` |
-| **File Location & Target** | Client Producer SDK Configuration |
-| **Configured Value** | `all` (or `-1`) *(Prod)* \| `1` *(Dev)* |
+| **Target Location** | Client Producer SDK Configuration |
+| **Currently Configured Value** | `all` (or `-1`) *(Prod)* \| `1` *(Dev)* |
 | **Apache Kafka Default** | `all` (since Kafka 3.0) |
+| **Expected / Recommended Values** | `0` (Fire & forget) \| `1` (Leader ACK) \| `all` (Full ISR Consensus) |
 | **Criticality Rating** | CRITICAL |
-| **1. What Is This Parameter?** | Dictates leader acknowledgment requirements before completing a produce request: `acks=0` (no ACK), `acks=1` (leader ACK only), `acks=all` (leader + all in-sync replicas ACK). |
-| **2. Why & When to Use It** | Setting `acks=all` prevents message loss if the leader broker dies immediately after accepting a write. Use `acks=all` for all telemetry and trace producers. |
-| **3. Impact on Current System** | Guarantees zero message loss in production when combined with `min.insync.replicas=2`. |
-| **4. How & Why to Scale / Increase** | Keep `acks=all` in production. For ultra-low latency metrics where data loss is acceptable, set `acks=1`. |
+| **Definition** | Dictates leader acknowledgment requirements before completing a produce request: `acks=0` (no ACK), `acks=1` (leader ACK only), `acks=all` (leader + all in-sync replicas ACK). |
+| **Why & When to Configure It** | **Why Configure It**: Setting `acks=all` guarantees that writes are committed to all in-sync replicas before returning success, preventing message loss if the leader broker dies.<br/>**When to Configure**: Mandatory for critical telemetry, financial, and trace data. |
+| **Outcome / System Impact** | **Durability Outcome**: Guarantees zero message loss during broker outages when paired with `min.insync.replicas=2`.<br/>**Latency Impact**: Adds minor round-trip latency to write operations. |
+| **Scaling & Troubleshooting** | Keep `acks=all` in production. If ultra-low latency metrics tolerate minor data loss, set `acks=1`. |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 4.3.2 `linger.ms` & `batch.size` — Producer Batching Mechanics
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `linger.ms` & `batch.size` |
-| **File Location & Target** | Client Producer SDK Configuration |
-| **Configured Value** | `linger.ms=10` \| `batch.size=16384` (16 KB) |
+| **Target Location** | Client Producer SDK Configuration |
+| **Currently Configured Value** | `linger.ms=10` \| `batch.size=16384` (16 KB) |
 | **Apache Kafka Default** | `linger.ms=0` \| `batch.size=16384` |
+| **Expected / Recommended Values** | Low-Latency: `linger.ms=0`, `batch.size=16384`<br/>High-Throughput: `linger.ms=20..50`, `batch.size=65536` |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | `batch.size` sets the maximum byte size per partition batch. `linger.ms` sets the maximum artificial delay to wait for more records to join the batch before sending. |
-| **2. Why & When to Use It** | Default `linger.ms=0` sends records immediately, creating thousands of tiny single-record TCP requests. Setting `linger.ms=10` allows records to group into full 16KB batches, increasing network and disk throughput by up to 5x. |
-| **3. Impact on Current System** | Significantly reduces network packet overhead and broker CPU utilization. |
-| **4. How & Why to Scale / Increase** | Increase `linger.ms` to 20ms–50ms and `batch.size` to 64KB (65536) under high-throughput ingestion (> 10 MB/sec). |
+| **Definition** | `batch.size` sets the maximum byte size per partition batch. `linger.ms` sets the maximum artificial delay to wait for more records to join the batch before sending. |
+| **Why & When to Configure It** | Default `linger.ms=0` sends records immediately, creating thousands of tiny single-record TCP requests. Setting `linger.ms=10` allows records to group into full 16KB batches, increasing network and disk throughput by up to 5x. |
+| **Outcome / System Impact** | Significantly reduces network packet overhead and broker CPU utilization while increasing batch write efficiency. |
+| **Scaling & Troubleshooting** | Increase `linger.ms` to 20ms–50ms and `batch.size` to 64KB (65536) under high-throughput ingestion (> 10 MB/sec). |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 4.3.3 `buffer.memory` & `max.block.ms` — Producer Memory Allocation
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `buffer.memory` & `max.block.ms` |
-| **File Location & Target** | Client Producer SDK Configuration |
-| **Configured Value** | `buffer.memory=33554432` (32 MB) \| `max.block.ms=60000` (60 Seconds) |
+| **Target Location** | Client Producer SDK Configuration |
+| **Currently Configured Value** | `buffer.memory=33554432` (32 MB) \| `max.block.ms=60000` (60 Seconds) |
 | **Apache Kafka Default** | `buffer.memory=33554432` \| `max.block.ms=60000` |
+| **Expected / Recommended Values** | Standard: `33554432` (32 MB)<br/>High-Burst: `67108864` (64 MB) or `134217728` (128 MB) |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | `buffer.memory` sets total RAM available to the producer to buffer unsent batches. `max.block.ms` sets how long `send()` blocks when the buffer is full before throwing an exception. |
-| **2. Why & When to Use It** | Protects producer application memory from un-bounded growth during broker network outages. |
-| **3. Impact on Current System** | Bounces producer memory usage to 32 MB and throws `TimeoutException` if network outages persist past 60 seconds. |
-| **4. How & Why to Scale / Increase** | Increase `buffer.memory` to 64MB or 128MB in high-throughput applications with bursts. |
+| **Definition** | `buffer.memory` sets total RAM available to the producer to buffer unsent batches. `max.block.ms` sets how long `send()` blocks when the buffer is full before throwing an exception. |
+| **Why & When to Configure It** | Protects producer application memory from un-bounded growth during broker network outages. |
+| **Outcome / System Impact** | Bounces producer memory usage to 32 MB and throws `TimeoutException` if network outages persist past 60 seconds. |
+| **Scaling & Troubleshooting** | Increase `buffer.memory` to 64MB or 128MB in high-throughput applications with bursts. |
 
 ---
 
@@ -339,40 +360,53 @@ graph TB
 
 ### 5.3 Consumer Detailed Configuration Breakdown
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+#### 5.3.1 `enable.auto.commit` & `auto.commit.interval.ms` — Offset Commit Control
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `enable.auto.commit` & `auto.commit.interval.ms` |
-| **File Location & Target** | Client Consumer SDK Configuration |
-| **Configured Value** | `enable.auto.commit=false` *(Prod)* \| `true` *(Dev)* |
+| **Target Location** | Client Consumer SDK Configuration |
+| **Currently Configured Value** | `enable.auto.commit=false` *(Prod)* \| `true` *(Dev)* |
 | **Apache Kafka Default** | `enable.auto.commit=true` \| `auto.commit.interval.ms=5000` |
+| **Expected / Recommended Values** | Analytics & Pipeline DB Sinks: `false`<br/>Stateless Real-Time Alerting: `true` |
 | **Criticality Rating** | CRITICAL |
-| **1. What Is This Parameter?** | Controls whether consumer offsets are committed automatically in the background on a periodic timer or managed explicitly by application code. |
-| **2. Why & When to Use It** | Automatic commit (`true`) risks data loss if the consumer crashes after committing offsets but before completing ClickHouse database writes. Setting `false` allows manual commit after database write success (at-least-once delivery). |
-| **3. Impact on Current System** | Guarantees exact telemetry delivery into ClickHouse without missing records. |
-| **4. How & Why to Scale / Increase** | Always set `enable.auto.commit=false` in production data pipelines and call `commitSync()` / `commitAsync()`. |
+| **Definition** | Controls whether consumer offsets are committed automatically in the background on a periodic timer or managed explicitly by application code. |
+| **Why & When to Configure It** | Automatic commit (`true`) risks data loss if the consumer crashes after committing offsets but before completing ClickHouse database writes. Setting `false` allows manual commit after database write success (at-least-once delivery). |
+| **Outcome / System Impact** | Guarantees exact telemetry delivery into ClickHouse without missing records. |
+| **Scaling & Troubleshooting** | Always set `enable.auto.commit=false` in production data pipelines and call `commitSync()` / `commitAsync()`. |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 5.3.2 `max.poll.interval.ms` & `max.poll.records` — Processing Loop Liveness
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `max.poll.interval.ms` & `max.poll.records` |
-| **File Location & Target** | Client Consumer SDK Configuration |
-| **Configured Value** | `max.poll.interval.ms=300000` (5 Min) \| `max.poll.records=500` |
+| **Target Location** | Client Consumer SDK Configuration |
+| **Currently Configured Value** | `max.poll.interval.ms=300000` (5 Min) \| `max.poll.records=500` |
 | **Apache Kafka Default** | `max.poll.interval.ms=300000` \| `max.poll.records=500` |
+| **Expected / Recommended Values** | Fast Processing: `max.poll.records=500`, `max.poll.interval.ms=300000`<br/>Heavy DB Batching: `max.poll.records=100`, `max.poll.interval.ms=600000` |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | `max.poll.records` sets maximum records returned in a single `poll()`. `max.poll.interval.ms` sets maximum time allowed between `poll()` calls before the consumer is marked dead and evicted from the group. |
-| **2. Why & When to Use It** | If ClickHouse batch inserts take longer than 5 minutes, Kafka assumes the consumer thread is stuck and triggers constant consumer group rebalance storms. |
-| **3. Impact on Current System** | Prevents rebalance storms during large ClickHouse batch ingestion operations. |
-| **4. How & Why to Scale / Increase** | If processing high-latency batches, reduce `max.poll.records` to 100 or increase `max.poll.interval.ms` to 600,000ms (10 minutes). |
+| **Definition** | `max.poll.records` sets maximum records returned in a single `poll()`. `max.poll.interval.ms` sets maximum time allowed between `poll()` calls before the consumer is marked dead and evicted from the group. |
+| **Why & When to Configure It** | If ClickHouse batch inserts take longer than 5 minutes, Kafka assumes the consumer thread is stuck and triggers constant consumer group rebalance storms. |
+| **Outcome / System Impact** | Prevents rebalance storms during large ClickHouse batch ingestion operations. |
+| **Scaling & Troubleshooting** | If processing high-latency batches, reduce `max.poll.records` to 100 or increase `max.poll.interval.ms` to 600,000ms (10 minutes). |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 5.3.3 `auto.offset.reset` — Offset Fallback Behavior
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `auto.offset.reset` |
-| **File Location & Target** | Client Consumer SDK Configuration |
-| **Configured Value** | `earliest` *(Dev/Recovery)* \| `latest` *(Default Ingest)* |
+| **Target Location** | Client Consumer SDK Configuration |
+| **Currently Configured Value** | `earliest` *(Dev/Recovery)* \| `latest` *(Default Ingest)* |
 | **Apache Kafka Default** | `latest` |
+| **Expected / Recommended Values** | Telemetry Ingestion / Recovery: `earliest`<br/>Real-Time Alerting: `latest` |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | Dictates consumer behavior when no initial offset exists or when offset is out of range: `earliest` (start from oldest available record), `latest` (start from newest incoming record). |
-| **2. Why & When to Use It** | Use `earliest` for new consumer groups that need to process historical buffered streams; use `latest` for real-time dashboard alerting. |
-| **3. Impact on Current System** | Ensures new ingestion instances process all buffered streams without skipping data. |
+| **Definition** | Dictates consumer behavior when no initial offset exists or when offset is out of range: `earliest` (start from oldest available record), `latest` (start from newest incoming record). |
+| **Why & When to Configure It** | Use `earliest` for new consumer groups that need to process historical buffered streams; use `latest` for real-time dashboard alerting. |
+| **Outcome / System Impact** | Ensures new ingestion instances process all buffered streams without skipping data. |
 
 ---
 
@@ -435,39 +469,52 @@ graph TB
 
 ### 6.3 Topic & Partition Detailed Configuration Breakdown
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+#### 6.3.1 `log.segment.bytes` — Partition Log Segment File Size
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `log.segment.bytes` |
-| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 15) |
-| **Configured Value** | `104857600` (100 MB) |
+| **Target Location** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 15) |
+| **Currently Configured Value** | `104857600` (100 MB) |
 | **Apache Kafka Default** | `1073741824` (1 GB) |
+| **Expected / Recommended Values** | Low/Dev: `104857600` (100 MB)<br/>Medium Prod: `268435456` (256 MB)<br/>High-Throughput Prod: `536870912` (512 MB) or `1073741824` (1 GB) |
 | **Criticality Rating** | CRITICAL |
-| **1. What Is This Parameter?** | Maximum byte size per partition segment file before closing and rolling a new active segment file. |
-| **2. Why & When to Use It** | **Retention rules apply ONLY to closed segments. Active segments are NEVER deleted regardless of age.** Setting 100 MB allows low/medium volume topics to close segments rapidly for daily deletion. |
-| **3. Impact on Current System** | Reclaims ~30 GB of storage space on `/dev/sda2` by preventing inactive topics from holding onto gigabytes of un-purged active segments. |
-| **4. How & Why to Scale / Increase** | Increase to 512MB or 1GB in high-throughput production (> 50,000 msgs/sec) to avoid excessive file handle creation. |
+| **Definition** | Maximum byte size per partition segment file before closing and rolling a new active segment file. |
+| **Why & When to Configure It** | **Retention rules apply ONLY to closed segments. Active segments are NEVER deleted regardless of age.** Setting 100 MB allows low/medium volume topics to close segments rapidly for daily deletion. |
+| **Outcome / System Impact** | Reclaims ~30 GB of storage space on `/dev/sda2` by preventing inactive topics from holding onto gigabytes of un-purged active segments. |
+| **Scaling & Troubleshooting** | Increase to 512MB or 1GB in high-throughput production (> 50,000 msgs/sec) to avoid excessive file handle creation. |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 6.3.2 `log.retention.hours` — Closed Log Lifetime
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `log.retention.hours` |
-| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 16) |
-| **Configured Value** | `24` (24 Hours / 1 Day) |
+| **Target Location** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 16) |
+| **Currently Configured Value** | `24` (24 Hours / 1 Day) |
 | **Apache Kafka Default** | `168` (168 Hours / 7 Days) |
+| **Expected / Recommended Values** | Base Dev: `24` (24 Hours)<br/>Production Buffer: `72` (3 Days)<br/>Long-Buffer Ingest: `168` (7 Days) |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | Duration in hours that closed segment files are retained on disk before physical deletion. |
-| **2. Why & When to Use It** | Kafka is an intermediate buffer. Telemetry data is consumed almost immediately by ClickHouse. Retaining 7 days duplicates data and consumes host storage. |
-| **3. Impact on Current System** | Reclaims ~35 GB of disk space on `/dev/sda2` by deleting 1-day-old segments. |
+| **Definition** | Duration in hours that closed segment files are retained on disk before physical deletion. |
+| **Why & When to Configure It** | Kafka is an intermediate buffer. Telemetry data is consumed almost immediately by ClickHouse. Retaining 7 days duplicates data and consumes host storage. |
+| **Outcome / System Impact** | Reclaims ~35 GB of disk space on `/dev/sda2` by deleting 1-day-old segments. |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 6.3.3 `log.roll.hours` — Time-Based Segment Rolling
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `log.roll.hours` |
-| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 17) |
-| **Configured Value** | `2` (2 Hours) |
+| **Target Location** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 17) |
+| **Currently Configured Value** | `2` (2 Hours) |
 | **Apache Kafka Default** | `168` (168 Hours / 7 Days) |
+| **Expected / Recommended Values** | Low-Volume Topics: `2` (2 Hours)<br/>High-Volume Topics: `12` (12 Hours) or `24` (24 Hours) |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | Maximum time window after which an active segment is forcibly closed, even if segment size is less than 100 MB. |
-| **2. Why & When to Use It** | Low-throughput topics take weeks to write 100 MB. Forced rolls every 2 hours guarantee active segments close and become eligible for 24-hour deletion. |
-| **3. Impact on Current System** | Eliminates storage leaks on dormant or low-volume topics. |
+| **Definition** | Maximum time window after which an active segment is forcibly closed, even if segment size is less than 100 MB. |
+| **Why & When to Configure It** | Low-throughput topics take weeks to write 100 MB. Forced rolls every 2 hours guarantee active segments close and become eligible for 24-hour deletion. |
+| **Outcome / System Impact** | Eliminates storage leaks on dormant or low-volume topics. |
 
 ---
 
@@ -489,28 +536,39 @@ graph TD
     end
 ```
 
+---
+
 ### 7.2 EOS Configuration Breakdown
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+#### 7.2.1 `enable.idempotence` — Producer Sequence Tracking
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `enable.idempotence` |
-| **File Location & Target** | Client Producer SDK Configuration |
-| **Configured Value** | `true` |
+| **Target Location** | Client Producer SDK Configuration |
+| **Currently Configured Value** | `true` |
 | **Apache Kafka Default** | `true` (since Kafka 3.0) |
+| **Expected / Recommended Values** | Standard: `true`<br/>Legacy/Disabled: `false` |
 | **Criticality Rating** | CRITICAL |
-| **1. What Is This Parameter?** | Ensures that the broker processes exactly one copy of a message batch sent by a producer, even if the producer retries due to network timeouts. |
-| **2. Why & When to Use It** | Eliminates duplicate records in telemetry and trace metrics pipelines caused by transient network retries. |
-| **3. Impact on Current System** | Eliminates duplicate span insertions into ClickHouse. |
+| **Definition** | Ensures that the broker processes exactly one copy of a message batch sent by a producer, even if the producer retries due to network timeouts. |
+| **Why & When to Configure It** | Eliminates duplicate records in telemetry and trace metrics pipelines caused by transient network retries. |
+| **Outcome / System Impact** | Eliminates duplicate span insertions into ClickHouse. |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 7.2.2 `isolation.level` — Consumer Read Isolation
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `isolation.level` |
-| **File Location & Target** | Client Consumer SDK Configuration |
-| **Configured Value** | `read_committed` *(Prod)* \| `read_uncommitted` *(Default)* |
+| **Target Location** | Client Consumer SDK Configuration |
+| **Currently Configured Value** | `read_committed` *(Prod)* \| `read_uncommitted` *(Default)* |
 | **Apache Kafka Default** | `read_uncommitted` |
+| **Expected / Recommended Values** | Non-Transactional: `read_uncommitted`<br/>Transactional Ingest: `read_committed` |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | Controls whether consumers read uncommitted transactional messages (`read_uncommitted`) or only messages belonging to committed transactions (`read_committed`). |
-| **2. Why & When to Use It** | Prevents consumers from reading dirty records from aborted producer transactions. |
+| **Definition** | Controls whether consumers read uncommitted transactional messages (`read_uncommitted`) or only messages belonging to committed transactions (`read_committed`). |
+| **Why & When to Configure It** | Prevents consumers from reading dirty records from aborted producer transactions. |
+| **Outcome / System Impact** | Filters out uncommitted records before writing to ClickHouse. |
 
 ---
 
@@ -543,26 +601,38 @@ graph LR
     CleanerThread --> After Compaction
 ```
 
+---
+
 ### 8.2 Compaction Configuration Breakdown
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+#### 8.2.1 `cleanup.policy` — Topic Storage Deletion vs Compaction
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `cleanup.policy` |
-| **File Location & Target** | Topic Configuration / `server.properties` |
-| **Configured Value** | `delete` *(Telemetry Streams)* \| `compact` *(State Stores)* |
+| **Target Location** | Topic Configuration / `server.properties` |
+| **Currently Configured Value** | `delete` *(Telemetry Streams)* \| `compact` *(State Stores)* |
 | **Apache Kafka Default** | `delete` |
+| **Expected / Recommended Values** | Stream Telemetry: `delete`<br/>Key-Value State Store: `compact`<br/>Hybrid Retention: `compact,delete` |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | `delete` purges closed segments based on time/size. `compact` retains the latest record value per message key forever. `compact,delete` compacts by key and enforces time-based expiration. |
-| **2. Why & When to Use It** | Use `delete` for streaming telemetry spans and access logs. Use `compact` for user profiles, service registries, and stateful application lookup caches. |
+| **Definition** | `delete` purges closed segments based on time/size. `compact` retains the latest record value per message key forever. `compact,delete` compacts by key and enforces time-based expiration. |
+| **Why & When to Configure It** | Use `delete` for streaming telemetry spans and access logs. Use `compact` for user profiles, service registries, and stateful application lookup caches. |
+| **Outcome / System Impact** | Prevents unbounded growth on key-value state store topics. |
 
-| Dimension | Detailed Technical Specifications & Operational Guidance |
+---
+
+#### 8.2.2 `min.cleanable.dirty.ratio` — Compaction Execution Trigger
+
+| Dimension | Technical Specification & Operational Guidance |
 |---|---|
 | **Parameter Key** | `min.cleanable.dirty.ratio` |
-| **File Location & Target** | `config/kafka/server.properties` |
-| **Configured Value** | `0.5` (50% Dirty Ratio) |
+| **Target Location** | `config/kafka/server.properties` |
+| **Currently Configured Value** | `0.5` (50% Dirty Ratio) |
 | **Apache Kafka Default** | `0.5` |
+| **Expected / Recommended Values** | Standard: `0.5` (50%)<br/>Frequent Compaction: `0.2` (20%) |
 | **Criticality Rating** | MEDIUM |
-| **1. What Is This Parameter?** | Controls the percentage of uncompacted ("dirty") records required in a log segment before the compaction cleaner thread executes. |
+| **Definition** | Controls the percentage of uncompacted ("dirty") records required in a log segment before the compaction cleaner thread executes. |
+| **Why & When to Configure It** | Lower values compact state store topics more aggressively at the cost of minor CPU background threads. |
 
 ---
 
@@ -635,23 +705,23 @@ docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
 
 ## 10. Master Parameter Summary Matrix
 
-| Config Parameter | Default Values | Values Example | What It Does | Why We Need To Set Up | Trade-off | Impact |
+| Config Parameter | Definition | Expected Values | Currently Configured Value | Outcome / Impact | Why We Need To Set Up | Trade-off |
 |---|---|---|---|---|---|---|
-| `KAFKA_HEAP_OPTS` | `-Xms1G -Xmx1G` | Dev: `-Xms512m -Xmx1024m`<br/>Prod: `-Xms1024m -Xmx2048m` | Sets initial (`-Xms`) and maximum (`-Xmx`) RAM allocated strictly to JVM heap. | Fixes launcher bug where performance flags broke heap sizing; keeps JVM heap bounded. | Higher heap reduces RAM available for ClickHouse and OS Page Cache. | Bounds JVM heap to 1024MB max; reduces G1GC pause times to < 50ms. |
-| `deploy.resources.limits.memory` | Unbounded (`None`) | Base: `2048M`<br/>Prod: `4096M` | Enforces hard Linux kernel cgroups memory limit around container process. | Prevents Kafka from consuming all 15 GB host RAM during telemetry spikes. | Under-provisioning limit triggers Linux OOM killer (Exit status 137). | Guarantees container RAM cannot exceed 2048MB; protects surrounding services. |
-| `log.segment.bytes` | `1073741824` (1 GB) | Dev: `104857600` (100 MB)<br/>Prod: `536870912` (512 MB) | Sets max byte size of active `.log` file before closing and rolling a new segment. | Kafka retention ONLY deletes closed segments; 100 MB segments ensure rapid closure. | Very small segments under high load increase file handles and disk fragmentation. | Allows daily log retention to delete expired data; reclaims ~30 GB storage. |
-| `log.retention.hours` | `168` (7 Days) | Dev: `24` (24 Hours)<br/>Prod: `72` (3 Days) | Defines duration closed log segments are retained on disk before deletion. | Kafka is an intermediate buffer; telemetry is ingested into ClickHouse immediately. | Lower retention means consumers have a shorter window to recover from outages. | Reclaims ~35 GB of disk space on `/dev/sda2` by deleting 1-day-old segments. |
-| `log.roll.hours` | `168` (7 Days) | Base: `2` (2 Hours)<br/>Prod: `12` (12 Hours) | Forcibly closes active segment after time window even if segment size < 100 MB. | Low-throughput topics take weeks to reach 100 MB; forced rolls enable daily deletion. | Creates more segment files across dormant or low-volume topics. | Guarantees active log segments close within 2 hours for predictable deletion. |
-| `log.retention.check.interval.ms` | `300000` (5 Min) | Base: `60000` (60 Seconds)<br/>Prod: `60000` (60 Seconds) | Sets millisecond interval for log cleaner thread to scan directories for expired files. | Rapidly deletes expired segments to free space on disk-constrained hosts. | Checking too frequently on 10,000+ partitions generates minor disk I/O. | Deletes expired segment files within 60 seconds of expiration; near-instant cleanup. |
-| `offsets.topic.num.partitions` | `50` | Base: `3`<br/>Prod: `25` | Defines partition count for internal `__consumer_offsets` tracking topic. | Default 50 partitions waste directories and open file handles on single-broker setup. | Lower partitions may cause commit lock contention across 100+ consumer groups. | Cuts offset topic folders from 50 to 3; saves 188+ open file descriptors. |
-| `num.partitions` | `1` | Base: `3`<br/>Prod: `3` | Sets default partition count for auto-created telemetry topics. | Enables 3-way parallel processing across worker threads matching CPU capacity. | Higher partitions increase metadata overhead and open segment file handles. | Enables 3-parallel consumer threads across 4 host CPU cores without thrash. |
-| `acks` | `all` | Dev: `1`<br/>Prod: `all` | Producer acknowledgment requirements before completing write request. | Setting `all` guarantees message persistence across in-sync replicas before returning. | `acks=all` increases write latency slightly compared to `acks=1`. | Guarantees zero message loss during broker outages in production. |
-| `linger.ms` | `0` | Base: `10`<br/>Prod: `20` | Artificial producer delay to wait for records to form full batch before sending. | Batching small records into 16KB batches increases network and disk throughput 5x. | Adds minor artificial delay (10ms) to record transmission. | Increases network ingestion throughput and reduces CPU socket overhead. |
-| `batch.size` | `16384` (16 KB) | Base: `16384`<br/>Prod: `65536` (64 KB) | Maximum byte size per partition batch in producer memory buffer. | Controls memory batch size sent in a single produce request. | Larger batch size increases producer memory allocation per partition. | Optimizes disk sequential write blocks and network socket payloads. |
-| `enable.auto.commit` | `true` | Dev: `true`<br/>Prod: `false` | Controls whether consumer commits offsets automatically or via manual code. | Manual commit (`false`) prevents data loss if consumer crashes mid-processing. | Requires explicit `commitSync()` or `commitAsync()` code handling. | Guarantees at-least-once processing into ClickHouse without data gaps. |
-| `max.poll.interval.ms` | `300000` (5 Min) | Base: `300000`<br/>Prod: `600000` (10 Min) | Maximum time allowed between consumer `poll()` calls before eviction. | Prevents rebalance storms when ClickHouse batch inserts take extended time. | Setting too high delays failure detection when a consumer actually dies. | Eliminates consumer group rebalance storms during long database writes. |
-| `enable.idempotence` | `true` | Base: `true`<br/>Prod: `true` | Enables Producer ID and sequence tracking to eliminate duplicate record writes. | Prevents duplicate record writes caused by producer network retries. | Negligible CPU overhead for sequence number validation. | Guarantees exact-once message writing to topic partition logs. |
-| `cleanup.policy` | `delete` | Base: `delete`<br/>Prod: `delete` *(or `compact` for state)* | Defines topic log cleanup strategy (`delete`, `compact`, `compact,delete`). | Controls whether log segments are deleted by time or compacted by record key. | Compaction requires background CPU and memory for dirty segment cleaner threads. | Prevents unbounded growth on key-value state store topics. |
+| `KAFKA_HEAP_OPTS` | Sets initial (`-Xms`) and maximum (`-Xmx`) physical RAM allocated strictly to JVM heap. | Dev: `-Xms512m -Xmx1024m`<br/>Prod: `-Xms1024m -Xmx2048m` | `-Xms512m -Xmx1024m` | Bounds JVM heap to 1024MB max; reduces G1GC pause times to < 50ms. | Fixes launcher bug where performance flags broke heap sizing; keeps JVM heap bounded. | Higher heap reduces RAM available for ClickHouse and OS Page Cache. |
+| `deploy.resources.limits.memory` | Enforces hard Linux kernel cgroups memory limit around container process. | Base: `2048M`<br/>Prod: `4096M` | `2048M` (Limit)<br/>`512M` (Reservation) | Guarantees container RAM cannot exceed 2048MB; protects surrounding services. | Prevents Kafka from consuming all 15 GB host RAM during telemetry spikes. | Under-provisioning limit triggers Linux OOM killer (Exit status 137). |
+| `log.segment.bytes` | Sets max byte size of active `.log` file before closing and rolling a new segment. | Dev: `100 MB`<br/>Prod: `512 MB` | `104857600` (100 MB) | Allows daily log retention to delete expired data; reclaims ~30 GB storage. | Kafka retention ONLY deletes closed segments; 100 MB segments ensure rapid closure. | Very small segments under high load increase file handles and disk fragmentation. |
+| `log.retention.hours` | Defines duration closed log segments are retained on disk before deletion. | Dev: `24` (24 Hours)<br/>Prod: `72` (3 Days) | `24` (24 Hours) | Reclaims ~35 GB of disk space on `/dev/sda2` by deleting 1-day-old segments. | Kafka is an intermediate buffer; telemetry is ingested into ClickHouse immediately. | Lower retention means consumers have a shorter window to recover from outages. |
+| `log.roll.hours` | Forcibly closes active segment after time window even if segment size < 100 MB. | Dev: `2` (2 Hours)<br/>Prod: `12` (12 Hours) | `2` (2 Hours) | Guarantees active log segments close within 2 hours for predictable deletion. | Low-throughput topics take weeks to reach 100 MB; forced rolls enable daily deletion. | Creates more segment files across dormant or low-volume topics. |
+| `log.retention.check.interval.ms` | Sets millisecond interval for log cleaner thread to scan directories for expired files. | Base: `60000` (60s)<br/>Prod: `60000` (60s) | `60000` (60 Seconds) | Deletes expired segment files within 60 seconds of expiration; near-instant cleanup. | Rapidly deletes expired segments to free space on disk-constrained hosts. | Checking too frequently on 10,000+ partitions generates minor disk I/O. |
+| `offsets.topic.num.partitions` | Defines partition count for internal `__consumer_offsets` tracking topic. | Base: `3`<br/>Prod: `25` | `3` | Cuts offset topic folders from 50 to 3; saves 188+ open file descriptors. | Default 50 partitions waste directories and open file handles on single-broker setup. | Lower partitions may cause commit lock contention across 100+ consumer groups. |
+| `num.partitions` | Sets default partition count for auto-created telemetry topics. | Base: `3`<br/>Prod: `3` | `3` | Enables 3-parallel consumer threads across 4 host CPU cores without thrash. | Enables 3-way parallel processing across worker threads matching CPU capacity. | Higher partitions increase metadata overhead and open segment file handles. |
+| `acks` | Producer acknowledgment requirements before completing write request. | Dev: `1`<br/>Prod: `all` | `all` (or `-1`) | Guarantees zero message loss during broker outages in production. | Setting `all` guarantees message persistence across in-sync replicas before returning. | `acks=all` increases write latency slightly compared to `acks=1`. |
+| `linger.ms` | Artificial producer delay to wait for records to form full batch before sending. | Base: `10`<br/>Prod: `20` | `10` ms | Increases network ingestion throughput and reduces CPU socket overhead. | Batching small records into 16KB batches increases network and disk throughput 5x. | Adds minor artificial delay (10ms) to record transmission. |
+| `batch.size` | Maximum byte size per partition batch in producer memory buffer. | Base: `16 KB`<br/>Prod: `64 KB` | `16384` (16 KB) | Optimizes disk sequential write blocks and network socket payloads. | Controls memory batch size sent in a single produce request. | Larger batch size increases producer memory allocation per partition. |
+| `enable.auto.commit` | Controls whether consumer commits offsets automatically or via manual code. | Dev: `true`<br/>Prod: `false` | `false` | Guarantees at-least-once processing into ClickHouse without data gaps. | Manual commit (`false`) prevents data loss if consumer crashes mid-processing. | Requires explicit `commitSync()` or `commitAsync()` code handling. |
+| `max.poll.interval.ms` | Maximum time allowed between consumer `poll()` calls before eviction. | Base: `300000`<br/>Prod: `600000` | `300000` (5 Minutes) | Eliminates consumer group rebalance storms during long database writes. | Prevents rebalance storms when ClickHouse batch inserts take extended time. | Setting too high delays failure detection when a consumer actually dies. |
+| `enable.idempotence` | Enables Producer ID and sequence tracking to eliminate duplicate record writes. | Base: `true`<br/>Prod: `true` | `true` | Guarantees exact-once message writing to topic partition logs. | Prevents duplicate record writes caused by producer network retries. | Negligible CPU overhead for sequence number validation. |
+| `cleanup.policy` | Defines topic log cleanup strategy (`delete`, `compact`, `compact,delete`). | Telemetry: `delete`<br/>State: `compact` | `delete` | Prevents unbounded growth on key-value state store topics. | Controls whether log segments are deleted by time or compacted by record key. | Compaction requires background CPU and memory for dirty segment cleaner threads. |
 
 ---
 
