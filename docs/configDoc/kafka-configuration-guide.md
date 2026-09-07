@@ -569,16 +569,16 @@ graph TB
     RequestQueue -->|Pop Request| IOThread2["KafkaRequestHandler 2"]
 
     subgraph MemoryArchitecture ["Broker Memory Architecture"]
-        IOThread1 -->|Allocate Objects| JVMHeap["JVM Heap (-Xmx1024M)<br/>Broker Metadata & Request Queues"]
-        IOThread1 -->|Native Buffers| NativeMem["Native Off-Heap Memory<br/>Direct ByteBuffers & Metaspace"]
-        IOThread1 -->|Zero-Copy Data| PageCache["Linux OS Page Cache<br/>In-Memory Log Files"]
+        IOThread1 -->|Allocate Objects| JVMHeap["JVM Heap (-Xmx1024M) - Broker Metadata"]
+        IOThread1 -->|Native Buffers| NativeMem["Native Off-Heap Memory - Direct ByteBuffers"]
+        IOThread1 -->|Zero-Copy Data| PageCache["Linux OS Page Cache - In-Memory Logs"]
     end
 
     subgraph StorageLayout ["Physical Storage Layout (/var/lib/kafka/data)"]
-        PageCache -->|Flush| LogFile["00000000000000000000.log<br/>(Message Data)"]
-        PageCache -->|Flush| IndexFile["00000000000000000000.index<br/>(Offset Index)"]
-        PageCache -->|Flush| TimeIndex["00000000000000000000.timeindex<br/>(Timestamp Index)"]
-        PageCache -->|Flush| EpochFile["leader-epoch-checkpoint<br/>(Leader Epochs)"]
+        PageCache -->|Flush| LogFile["00000000000000000000.log (Message Data)"]
+        PageCache -->|Flush| IndexFile["00000000000000000000.index (Offset Index)"]
+        PageCache -->|Flush| TimeIndex["00000000000000000000.timeindex (Timestamp Index)"]
+        PageCache -->|Flush| EpochFile["leader-epoch-checkpoint (Leader Epochs)"]
     end
 
     style Acceptor fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
@@ -682,7 +682,7 @@ producer.flush()
 
 ```mermaid
 graph TD
-    AppThread["Application Thread<br/>send(ProducerRecord)"] --> Serializer["Key/Value Serializers"]
+    AppThread["Application Thread - send(ProducerRecord)"] --> Serializer["Key/Value Serializers"]
     Serializer --> Partitioner["Partitioner (MurmurHash2 / RoundRobin)"]
     Partitioner --> RecordAccumulator["RecordAccumulator (Memory Buffer)"]
 
@@ -712,9 +712,9 @@ graph TD
 ```mermaid
 graph TB
     subgraph ProducerMemoryPool ["Producer Memory Pool (buffer.memory = 32MB)"]
-        BatchP0["Partition 0 Batch<br/>(batch.size = 16KB)"]
-        BatchP1["Partition 1 Batch<br/>(batch.size = 16KB)"]
-        BatchP2["Partition 2 Batch<br/>(batch.size = 16KB)"]
+        BatchP0["Partition 0 Batch (batch.size = 16KB)"]
+        BatchP1["Partition 1 Batch (batch.size = 16KB)"]
+        BatchP2["Partition 2 Batch (batch.size = 16KB)"]
     end
 
     subgraph BatchTriggerLogic ["Batch Trigger Conditions"]
@@ -1122,17 +1122,17 @@ graph TB
 ```mermaid
 graph LR
     subgraph LogSegmentPointers ["Partition Log Offset & Watermark Architecture"]
-        O0["Offset 0<br/>(Committed)"] --- O1["Offset 1<br/>(Committed)"]
-        O1 --- O2["Offset 2<br/>(Committed)"]
-        O2 --- O3["Offset 3<br/>(Committed)"]
-        O3 --- O4["Offset 4<br/>(Uncommitted)"]
-        O4 --- O5["Offset 5<br/>(Log End)"]
+        O0["Offset 0 (Committed)"] --> O1["Offset 1 (Committed)"]
+        O1 --> O2["Offset 2 (Committed)"]
+        O2 --> O3["Offset 3 (Committed)"]
+        O3 --> O4["Offset 4 (Uncommitted)"]
+        O4 --> O5["Offset 5 (Log End)"]
     end
 
-    CommittedPointer["Consumer Committed Offset Pointer: 2<br/>(__consumer_offsets)"] --> O2
+    CommittedPointer["Consumer Committed Offset Pointer: 2 (__consumer_offsets)"] --> O2
     FetchPosition["Consumer Fetch Position Pointer: 3"] --> O3
-    HWPointer["High Watermark (HW): 4<br/>(Max Safe Readable Offset)"] --> O4
-    LEOPointer["Log End Offset (LEO): 5<br/>(Next Write Target)"] --> O5
+    HWPointer["High Watermark (HW): 4 (Max Safe Readable Offset)"] --> O4
+    LEOPointer["Log End Offset (LEO): 5 (Next Write Target)"] --> O5
 
     style O0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style O1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
@@ -1256,7 +1256,7 @@ graph TD
 ```mermaid
 graph TB
     subgraph PartitionDirectoryEngine ["Partition Engine (/var/lib/kafka/data/llmobs-spans-0/)"]
-        WriteOp["Produce Record Appended"] --> ActiveSegment["Active Segment: 00000000000000000200.log<br/>(Currently Appending Write)"]
+        WriteOp["Produce Record Appended"] --> ActiveSegment["Active Segment: 00000000000000000200.log (Currently Appending Write)"]
 
         ActiveSegment --> RollCondition{"Segment Full 100MB or Time Expired 2h?"}
         RollCondition -- Yes --> CloseSegment["Close Active Segment -> Mark INACTIVE"]
@@ -1264,8 +1264,8 @@ graph TB
         RollCondition -- No --> KeepWriting["Continue Appending Writes"]
 
         subgraph IndexLookups ["Offset and Time Index Files"]
-            OffsetIndex["00000000000000000000.index<br/>(Maps Offset -> Physical Byte Position)"]
-            TimeIndex["00000000000000000000.timeindex<br/>(Maps Timestamp -> Offset)"]
+            OffsetIndex["00000000000000000000.index (Maps Offset to Physical Byte Position)"]
+            TimeIndex["00000000000000000000.timeindex (Maps Timestamp to Offset)"]
         end
 
         CloseSegment --> IndexLookups
@@ -1590,9 +1590,9 @@ cluster_producer = Producer({
 graph TB
     subgraph MultiBrokerCluster ["Multi-Broker KRaft Cluster Architecture"]
         direction LR
-        B1["Kafka Broker 1 (Node ID 1)<br/>Heap: 2048M | cgroup: 4096M"]
-        B2["Kafka Broker 2 (Node ID 2)<br/>Heap: 2048M | cgroup: 4096M"]
-        B3["Kafka Broker 3 (Node ID 3)<br/>Heap: 2048M | cgroup: 4096M"]
+        B1["Kafka Broker 1 (Node ID 1) - Heap: 2048M"]
+        B2["Kafka Broker 2 (Node ID 2) - Heap: 2048M"]
+        B3["Kafka Broker 3 (Node ID 3) - Heap: 2048M"]
 
         B1 -->|KRaft Sync| B2
         B2 -->|KRaft Sync| B3
