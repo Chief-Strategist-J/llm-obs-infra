@@ -78,7 +78,7 @@ graph LR
 
 ---
 
-## 3. Parameter-by-Parameter Deep-Dive & Operational Tables
+## 3. Categorized Parameter Deep-Dive & Detailed Tables
 
 ---
 
@@ -150,75 +150,184 @@ graph LR
 
 ---
 
-### 3.3 Performance, I/O & Thread Tuning Parameters
+#### 3.2.3 `log.roll.hours` — Time-Based Segment Rolling
 
-#### 3.3.1 `num.network.threads` — Socket Acceptor Threads
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `log.roll.hours` |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 17) |
+| **Configured Value** | `2` (2 Hours) |
+| **Apache Kafka Default** | `168` (168 Hours / 7 Days) |
+| **Criticality Rating** | HIGH |
+| **1. What Is This Parameter?** | Enforces a maximum time window after which an active segment is forcibly closed, even if it has not reached `log.segment.bytes` (100 MB). |
+| **2. Why & When to Use It** | **Why It Is Useful**: Low-throughput topics (e.g., control plane heartbeats) might take weeks to write 100 MB. Without time-based rolling, active segments on dormant topics would remain open indefinitely, bypassing retention rules.<br/>**Why We Configured It**: Setting `log.roll.hours=2` guarantees that every active segment closes within 2 hours regardless of throughput, enabling 24-hour retention deletion on schedule.<br/>**Criticality**: HIGH for environments with mixed high/low volume topics. |
+| **3. Impact on Current System** | **Guaranteed Deletion Cycle**: Ensures all topics close active segments every 2 hours, making them eligible for deletion within 24–26 hours.<br/>**Eliminates Storage Leaks**: Prevents dormant topics from holding open segment references indefinitely. |
+| **4. How & Why to Scale / Increase** | **When to Increase**: In high-throughput production environments where all topics write 100 MB+ every few minutes, explicit time-based rolling is redundant.<br/>**Recommended Production Values**: `log.roll.hours=12` or `24`. |
+
+---
+
+#### 3.2.4 `log.retention.check.interval.ms` — Retention Evaluation Frequency
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `log.retention.check.interval.ms` |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 18) |
+| **Configured Value** | `60000` (60 Seconds) |
+| **Apache Kafka Default** | `300000` (5 Minutes) |
+| **Criticality Rating** | MEDIUM |
+| **1. What Is This Parameter?** | Controls how frequently the background log cleaner thread scans partition directories to evaluate segment expiration. |
+| **2. Why & When to Use It** | **Why It Is Useful**: Reduces the delay between a segment expiring (passing 24 hours) and its physical deletion from disk.<br/>**Why We Configured It**: Shortening the check interval to 60 seconds ensures expired segments are unlinked almost immediately after reaching their 24-hour limit on disk-constrained systems (`/dev/sda2`).<br/>**Criticality**: MEDIUM. |
+| **3. Impact on Current System** | **Rapid Space Recovery**: Reclaims disk space within 60 seconds of segment expiration.<br/>**Low CPU Overhead**: Checking file metadata once per minute consumes less than 0.1% CPU on 4 cores. |
+| **4. How & Why to Scale / Increase** | **When to Increase**: Only if a cluster hosts tens of thousands of partitions, where scanning partition directories every 60 seconds generates excessive disk metadata I/O.<br/>**Recommended Production Value**: `300000` (5 minutes). |
+
+---
+
+### 3.3 Topic & Partition Management Parameters
+
+#### 3.3.1 `num.partitions` — Default Topic Parallelism
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `num.partitions` / `KAFKA_NUM_PARTITIONS` |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 12) & [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) (Line 114) |
+| **Configured Value** | `3` |
+| **Apache Kafka Default** | `1` |
+| **Criticality Rating** | HIGH |
+| **1. What Is This Parameter?** | Sets the default number of parallel log partitions created when a new topic is created automatically. |
+| **2. Why & When to Use It** | **Why It Is Useful**: Kafka achieves consumer parallelism through partitions. Each partition is assigned to one consumer thread within a group.<br/>**Why We Configured It**: Setting `num.partitions=3` enables 3 consumer threads to process streaming telemetry concurrently across the 4 host CPU cores.<br/>**Criticality**: HIGH. |
+| **3. Impact on Current System** | **Parallel Processing**: Enables parallel data streaming across 3 worker threads.<br/>**CPU Alignment**: Matches 4-core host CPU architecture cleanly without context-switching thrash. |
+| **4. How & Why to Scale / Increase** | **When to Increase**: When consumer processing lag builds up on high-throughput topics and consumer services have available CPU cores.<br/>**Scaling Rule**: `Topic Partitions = Target Consumer Threads` (equal to or a multiple of CPU cores). |
+
+---
+
+#### 3.3.2 `offsets.topic.num.partitions` — Internal Offset Topic Partitions
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `offsets.topic.num.partitions` |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 19) |
+| **Configured Value** | `3` |
+| **Apache Kafka Default** | `50` |
+| **Criticality Rating** | HIGH |
+| **1. What Is This Parameter?** | Sets the partition count for Kafka's internal `__consumer_offsets` topic, which stores consumer group commit progress. |
+| **2. Why & When to Use It** | **Why It Is Useful**: Default 50 partitions pre-allocate 50 directory folders and 200+ index/log files. On single-broker infrastructure with only 3–5 consumer groups, 50 partitions waste file descriptors (`nofile`) and system inodes.<br/>**Why We Configured It**: Cutting partition count to 3 saves 47 directories and ~188 open file handles inside the container.<br/>**Criticality**: HIGH for single-broker or small cluster deployments. |
+| **3. Impact on Current System** | **Directory Footprint**: Reduces internal topic folder bloat from 50 directories down to **3 directories**.<br/>**File Descriptor Conservation**: Saves file handles and system inodes. |
+| **4. How & Why to Scale / Increase** | **When to Increase**: In large production clusters with hundreds of distinct consumer groups, increasing offset topic partitions prevents consumer commit lock contention.<br/>**Scaling Values**: Dev: `3` \| Production (<100 groups): `10` \| Enterprise (200+ groups): `50`. |
+
+---
+
+#### 3.3.3 `auto.create.topics.enable` — Explicit Topic Creation Guard
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `auto.create.topics.enable` |
+| **File Location & Target** | `config/kafka/server.properties` |
+| **Configured Value** | `true` *(Dev)* \| `false` *(Recommended Prod)* |
+| **Apache Kafka Default** | `true` |
+| **Criticality Rating** | HIGH |
+| **1. What Is This Parameter?** | Controls whether Kafka automatically creates a topic when a producer writes to or a consumer reads from an uncreated topic name. |
+| **2. Why & When to Use It** | **Why It Is Useful**: Setting to `false` in production prevents accidental topic creation caused by client typos, which would otherwise create default single-partition unoptimized topics.<br/>**Criticality**: HIGH for production governance. |
+| **3. Impact on Current System** | Prevents rogue applications from creating unpartitioned, unbounded topics. |
+
+---
+
+### 3.4 Consumer & Rebalance Management Parameters
+
+#### 3.4.1 `KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS` — Consumer Rebalance Delay
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS` |
+| **File Location & Target** | [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) (Line 113) |
+| **Configured Value** | `0` |
+| **Apache Kafka Default** | `3000` (3 Seconds) |
+| **Criticality Rating** | MEDIUM |
+| **1. What Is This Parameter?** | The time window Kafka's Group Coordinator waits before initiating a consumer group rebalance while new consumers are joining during startup. |
+| **2. Why & When to Use It** | **Why We Configured It**: Telemetry consumers start simultaneously when Docker boots. Setting to `0` allows consumer groups to allocate partitions instantly without artificial 3-second delays.<br/>**Criticality**: MEDIUM. |
+| **3. Impact on Current System** | **Instant Startup**: Speeds up initial consumer group assignment and telemetry stream establishment upon container launch. |
+
+---
+
+#### 3.4.2 `max.poll.interval.ms` & `session.timeout.ms` — Consumer Heartbeat & Liveness
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `max.poll.interval.ms` & `session.timeout.ms` |
+| **File Location & Target** | Client SDK Configuration / `server.properties` |
+| **Configured Value** | `max.poll.interval.ms=300000` (5 Min) \| `session.timeout.ms=45000` (45s) |
+| **Apache Kafka Default** | `300000`ms / `45000`ms |
+| **Criticality Rating** | HIGH |
+| **1. What Is This Parameter?** | `session.timeout.ms` detects dead consumer nodes via missing heartbeats. `max.poll.interval.ms` detects stuck consumer threads that take too long to process a batch of records. |
+| **2. Why & When to Use It** | **Why It Is Useful**: If ClickHouse batch insertion takes longer than `max.poll.interval.ms`, Kafka marks the consumer dead and triggers constant group rebalancing storms.<br/>**Criticality**: HIGH when tuning heavy ingestion sinks. |
+| **3. Impact on Current System** | Prevents consumer group rebalance thrashing during long analytical write operations into ClickHouse. |
+
+---
+
+### 3.5 Performance & Network I/O Scaling Parameters
+
+#### 3.5.1 `num.network.threads` — Socket Acceptor Threads
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
 | **Parameter Key** | `num.network.threads` |
-| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 22) |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) |
 | **Configured Value** | `3` |
 | **Apache Kafka Default** | `3` |
 | **Criticality Rating** | HIGH |
 | **1. What Is This Parameter?** | Dictates the number of network acceptor threads that handle TCP socket connections, reading client requests and writing responses across network interfaces. |
-| **2. Why & When to Use It** | **Why It Is Useful**: Prevents TCP connection queues from blocking when hundreds of telemetry agents connect simultaneously.<br/>**When to Use It**: When connection rates or concurrent producer count grows rapidly.<br/>**Criticality**: HIGH for high-concurrency environments. |
+| **2. Why & When to Use It** | **Why It Is Useful**: Prevents TCP connection queues from blocking when hundreds of telemetry agents connect simultaneously.<br/>**Criticality**: HIGH for high-concurrency environments. |
 | **3. Impact on Current System** | Provides dedicated socket event loops matching host CPU cores without thread context-switching overhead. |
-| **4. How & Why to Scale / Increase** | **Monitoring Metric**: JMX metric `NetworkProcessorAvgIdlePercent` < 0.3.<br/>**Scaling Rule**: `num.network.threads = Number of CPU Cores`. |
 
 ---
 
-#### 3.3.2 `num.io.threads` — Disk I/O Worker Threads
+#### 3.5.2 `num.io.threads` — Disk I/O Worker Threads
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
 | **Parameter Key** | `num.io.threads` |
-| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 23) |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) |
 | **Configured Value** | `4` |
 | **Apache Kafka Default** | `8` |
 | **Criticality Rating** | HIGH |
 | **1. What Is This Parameter?** | Dictates the number of worker threads (`KafkaRequestHandler`) that process requests from the request queue, perform disk reads/writes, and update topic logs. |
-| **2. Why & When to Use It** | **Why We Configured It**: The default of 8 I/O threads on a 4-core host causes excessive CPU thread contention. Setting `num.io.threads=4` aligns disk worker processing directly with physical CPU cores.<br/>**Criticality**: HIGH. |
+| **2. Why We Configured It** | The default of 8 I/O threads on a 4-core host causes excessive CPU thread contention. Setting `num.io.threads=4` aligns disk worker processing directly with physical CPU cores. |
 | **3. Impact on Current System** | Eliminates CPU thread context switching and stabilizes disk write latency under 10ms. |
-| **4. How & Why to Scale / Increase** | **Monitoring Metric**: JMX metric `RequestHandlerAvgIdlePercent` < 0.2.<br/>**Scaling Rule**: `num.io.threads = 2 × Number of Physical Disk Drives / SSD Channels`. |
 
 ---
 
-#### 3.3.3 `compression.type` — Payload Compression Algorithm
+#### 3.5.3 `compression.type` — Payload Compression Codec
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
 | **Parameter Key** | `compression.type` |
-| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 27) |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) |
 | **Configured Value** | `producer` *(Supports `lz4` / `zstd` overrides)* |
-| **Apache Kafka Default** | `producer` (retains client compression) |
+| **Apache Kafka Default** | `producer` |
 | **Criticality Rating** | MEDIUM |
 | **1. What Is This Parameter?** | Specifies the compression codec (`none`, `gzip`, `snappy`, `lz4`, `zstd`) used to compress topic message batches on disk and network. |
-| **2. Why & When to Use It** | **Why It Is Useful**: JSON and Protobuf telemetry payloads are highly compressible. Setting `lz4` or `zstd` reduces disk storage and network bandwidth by 60%–80%.<br/>**Criticality**: MEDIUM. |
+| **2. Why & When to Use It** | **Why It Is Useful**: JSON and Protobuf telemetry payloads are highly compressible. Setting `lz4` or `zstd` reduces disk storage and network bandwidth by 60%–80%. |
 | **3. Impact on Current System** | Drastically reduces disk storage consumption on `/dev/sda2` while adding minimal CPU compression overhead. |
-| **4. How & Why to Scale / Increase** | **When to Choose Codec**: Use `lz4` for lowest CPU latency; use `zstd` for maximum compression ratio on log archives. |
 
 ---
 
-### 3.4 Durability & Data Loss Prevention Parameters
+### 3.6 Durability, High Availability & Data Loss Prevention Parameters
 
-#### 3.4.1 `unclean.leader.election.enable` — Data Loss Prevention on Failover
+#### 3.6.1 `unclean.leader.election.enable` — Data Loss Prevention on Failover
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
 | **Parameter Key** | `unclean.leader.election.enable` |
-| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 28) |
+| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) |
 | **Configured Value** | `false` |
 | **Apache Kafka Default** | `false` |
 | **Criticality Rating** | CRITICAL |
 | **1. What Is This Parameter?** | Controls whether an out-of-sync replica (ISR) can be elected as partition leader if all in-sync leaders fail. |
-| **2. Why & When to Use It** | **Why It Is Useful**: Setting to `true` allows out-of-sync replicas to take over, causing **silent data loss and log divergence**. Setting to `false` guarantees strict data durability.<br/>**Criticality**: CRITICAL for financial, audit, and exact-once telemetry pipelines. |
+| **2. Why & When to Use It** | **Why It Is Useful**: Setting to `true` allows out-of-sync replicas to take over, causing silent data loss and log divergence. Setting to `false` guarantees strict data durability.<br/>**Criticality**: CRITICAL for financial, audit, and exact-once telemetry pipelines. |
 | **3. Impact on Current System** | Guarantees zero message loss during broker failovers in multi-node clusters. |
-| **4. How & Why to Scale / Increase** | Keep set to `false` in all production clusters to prevent silent data corruption. |
 
 ---
 
-#### 3.4.2 `min.insync.replicas` — Minimum In-Sync Replica Writes
+#### 3.6.2 `min.insync.replicas` — Minimum In-Sync Replica Writes
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
@@ -228,24 +337,40 @@ graph LR
 | **Apache Kafka Default** | `1` |
 | **Criticality Rating** | CRITICAL |
 | **1. What Is This Parameter?** | Specifies the minimum number of in-sync replicas that must acknowledge a producer write when `acks=all`. |
-| **2. Why & When to Use It** | **Why It Is Useful**: In a 3-broker cluster with `replication.factor=3` and `min.insync.replicas=2`, a write succeeds only if at least 2 brokers persist it, guaranteeing fault tolerance even if 1 broker dies.<br/>**Criticality**: CRITICAL for high availability. |
+| **2. Why & When to Use It** | In a 3-broker cluster with `replication.factor=3` and `min.insync.replicas=2`, a write succeeds only if at least 2 brokers persist it, guaranteeing fault tolerance even if 1 broker dies. |
 | **3. Impact on Current System** | Ensures data survives broker hardware failures in multi-node production. |
 
 ---
 
-### 3.5 Observability & Security Parameters
+### 3.7 Security & Access Control Parameters
 
-#### 3.5.1 `KAFKA_JMX_OPTS` & JMX Metrics Exporter
+#### 3.7.1 `security.inter.broker.protocol` & `listener.security.protocol.map`
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `security.inter.broker.protocol` & `listener.security.protocol.map` |
+| **File Location & Target** | [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) (Line 108) |
+| **Configured Value** | `CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT` *(Dev)* \| `SSL` / `SASL_SSL` *(Prod)* |
+| **Apache Kafka Default** | `PLAINTEXT` |
+| **Criticality Rating** | HIGH |
+| **1. What Is This Parameter?** | Maps protocol listeners (`PLAINTEXT`, `SSL`, `SASL_PLAINTEXT`, `SASL_SSL`) to network ports for internal broker communication and external client access. |
+| **2. Why & When to Use It** | **Why It Is Useful**: In production environments, enforcing `SSL` or `SASL_SSL` encrypts telemetry data in transit and authenticates microservices.<br/>**Criticality**: HIGH for enterprise compliance. |
+
+---
+
+### 3.8 Observability & Telemetry Parameters
+
+#### 3.8.1 `KAFKA_JMX_OPTS` & JMX Metrics Exporter
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
 | **Parameter Key** | `KAFKA_JMX_OPTS` & `JMX_PORT` |
-| **File Location & Target** | [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) (Environment) |
+| **File Location & Target** | [`docker-compose.yml`](file:///home/btpl-lap-22/live/llm-obs-infra/docker-compose.yml) |
 | **Configured Value** | Port `9999` (JMX RMI Exporter) |
 | **Apache Kafka Default** | Disabled (`None`) |
 | **Criticality Rating** | HIGH |
 | **1. What Is This Parameter?** | Exposes internal Kafka Java Management Extensions (JMX) performance metrics to Prometheus and Grafana. |
-| **2. Why & When to Use It** | **Why It Is Useful**: Enables real-time tracking of broker health, consumer lag, disk throughput, and GC pauses.<br/>**Criticality**: HIGH for production observability. |
+| **2. Why & When to Use It** | Enables real-time tracking of broker health, consumer lag, disk throughput, and GC pauses. |
 
 #### Critical JMX Metrics Reference Table
 
@@ -271,6 +396,7 @@ graph LR
 | `log.retention.check.interval.ms` | `300000` (5 Min) | Base: `60000` (60 Seconds)<br/>Prod: `60000` (60 Seconds) | Sets millisecond interval for log cleaner thread to scan directories for expired files. | Rapidly deletes expired segments to free space on disk-constrained hosts. | Checking too frequently on 10,000+ partitions generates minor disk I/O. | Deletes expired segment files within 60 seconds of expiration; near-instant cleanup. |
 | `offsets.topic.num.partitions` | `50` | Base: `3`<br/>Prod: `25` | Defines partition count for internal `__consumer_offsets` tracking topic. | Default 50 partitions waste directories and open file handles on single-broker setup. | Lower partitions may cause commit lock contention across 100+ consumer groups. | Cuts offset topic folders from 50 to 3; saves 188+ open file descriptors. |
 | `num.partitions` | `1` | Base: `3`<br/>Prod: `3` | Sets default partition count for auto-created telemetry topics. | Enables 3-way parallel processing across worker threads matching CPU capacity. | Higher partitions increase metadata overhead and open segment file handles. | Enables 3-parallel consumer threads across 4 host CPU cores without thrash. |
+| `auto.create.topics.enable` | `true` | Dev: `true`<br/>Prod: `false` | Controls whether uncreated topic names are automatically created on first write/read. | Setting to false in prod prevents client typos from creating single-partition topics. | Requires explicit topic creation before client connection in production. | Prevents rogue applications from creating unpartitioned, unbounded topics. |
 | `num.network.threads` | `3` | Base: `3`<br/>Prod: `8` | Sets number of network acceptor threads handling client TCP sockets. | Prevents TCP connection queue bottlenecks when thousands of agents connect. | Excess threads generate CPU context-switching overhead. | Handles socket connection loops efficiently across host CPU cores. |
 | `num.io.threads` | `8` | Base: `4`<br/>Prod: `8` | Sets number of worker threads executing disk reads and log writes. | Aligns disk worker processing directly with physical CPU cores (4 cores). | Too many worker threads create disk channel and CPU lock contention. | Stabilizes disk write latency under 10ms on host storage. |
 | `compression.type` | `producer` | Base: `producer`<br/>Prod: `lz4` | Defines message compression codec (`none`, `gzip`, `snappy`, `lz4`, `zstd`). | Telemetry payloads (JSON/Protobuf) compress heavily, saving 70% storage and I/O. | Compression adds minor CPU encoding latency on producers/brokers. | Reduces disk space usage and network bandwidth by 60%-80%. |
