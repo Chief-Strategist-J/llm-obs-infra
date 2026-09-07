@@ -559,27 +559,55 @@ graph TD
 
 ```mermaid
 graph TB
-    Acceptor["Acceptor Thread"] -->|NIO Select| NetThread1["Network Thread 1"]
-    Acceptor -->|NIO Select| NetThread2["Network Thread 2"]
+    subgraph AcceptorLayer ["Network Transport Layer"]
+        Acceptor["Acceptor Thread (Port 9092)"]
+    end
 
-    NetThread1 -->|Push Request| RequestQueue["Request Queue"]
-    NetThread2 -->|Push Request| RequestQueue
+    subgraph NetworkThreadPool ["Network Processing Pool"]
+        NetThread1["Network Thread 1"]
+        NetThread2["Network Thread 2"]
+    end
 
-    RequestQueue -->|Pop Request| IOThread1["KafkaRequestHandler 1"]
-    RequestQueue -->|Pop Request| IOThread2["KafkaRequestHandler 2"]
+    subgraph RequestQueueLayer ["Request Queue Layer"]
+        RequestQueue["Broker Request Queue"]
+    end
+
+    subgraph HandlerThreadPool ["I/O Request Handler Pool"]
+        IOThread1["KafkaRequestHandler 1"]
+        IOThread2["KafkaRequestHandler 2"]
+    end
 
     subgraph MemoryArchitecture ["Broker Memory Architecture"]
-        IOThread1 -->|Allocate Objects| JVMHeap["JVM Heap (-Xmx1024M) - Broker Metadata"]
-        IOThread1 -->|Native Buffers| NativeMem["Native Off-Heap Memory - Direct ByteBuffers"]
-        IOThread1 -->|Zero-Copy Data| PageCache["Linux OS Page Cache - In-Memory Logs"]
+        JVMHeap["JVM Heap (-Xmx1024M) - Broker Metadata"]
+        NativeMem["Native Off-Heap Memory - Direct ByteBuffers"]
+        PageCache["Linux OS Page Cache - In-Memory Logs"]
     end
 
     subgraph StorageLayout ["Physical Storage Layout (/var/lib/kafka/data)"]
-        PageCache -->|Flush| LogFile["00000000000000000000.log (Message Data)"]
-        PageCache -->|Flush| IndexFile["00000000000000000000.index (Offset Index)"]
-        PageCache -->|Flush| TimeIndex["00000000000000000000.timeindex (Timestamp Index)"]
-        PageCache -->|Flush| EpochFile["leader-epoch-checkpoint (Leader Epochs)"]
+        LogFile["00000000000000000000.log (Message Data)"]
+        IndexFile["00000000000000000000.index (Offset Index)"]
+        TimeIndex["00000000000000000000.timeindex (Timestamp Index)"]
+        EpochFile["leader-epoch-checkpoint (Leader Epochs)"]
     end
+
+    Acceptor -->|NIO Select| NetThread1
+    Acceptor -->|NIO Select| NetThread2
+
+    NetThread1 -->|Enqueue Request| RequestQueue
+    NetThread2 -->|Enqueue Request| RequestQueue
+
+    RequestQueue -->|Dequeue Request| IOThread1
+    RequestQueue -->|Dequeue Request| IOThread2
+
+    IOThread1 -->|Heap Allocation| JVMHeap
+    IOThread1 -->|Direct Buffer| NativeMem
+    IOThread1 -->|Zero-Copy Write| PageCache
+    IOThread2 -->|Zero-Copy Write| PageCache
+
+    PageCache -->|OS Flush| LogFile
+    PageCache -->|OS Flush| IndexFile
+    PageCache -->|OS Flush| TimeIndex
+    PageCache -->|OS Flush| EpochFile
 
     style Acceptor fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style NetThread1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
@@ -595,7 +623,7 @@ graph TB
     style TimeIndex fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style EpochFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12 stroke:#34d399,stroke-width:2px;
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
