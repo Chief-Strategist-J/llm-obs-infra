@@ -513,24 +513,24 @@ The high-level architecture routes client telemetry across secure ingress endpoi
 ```mermaid
 graph LR
     subgraph ClientSources ["Client Ingestion Sources"]
-        SDKClient["LLM Application SDK (Python / Node.js)"]
+        SDKClient["LLM Application SDK - Python or Node.js"]
         BrowserApp["Frontend Next.js Telemetry Client"]
     end
 
     subgraph IngressGateway ["Collector Network Ingress"]
-        GRPCReceiver["OTLP gRPC Receiver (Port 4317 TLS)"]
-        HTTPReceiver["OTLP HTTP Receiver (Port 4318 TLS)"]
+        GRPCReceiver["OTLP gRPC Receiver - Port 4317 TLS"]
+        HTTPReceiver["OTLP HTTP Receiver - Port 4318 TLS"]
     end
 
     subgraph PipelineCore ["Sequential Trace Processing Engine"]
-        MemGate["1. Memory Limiter (800 MiB Limit / 160 MiB Spike)"]
+        MemGate["1. Memory Limiter - 800 MiB Limit, 160 MiB Spike"]
         Sanitize["2. Transform OTTL PII Redaction"]
-        BatchEngine["3. Batch Processor (1024 Spans / 1s Flush)"]
+        BatchEngine["3. Batch Processor - 1024 Spans, 1s Flush"]
     end
 
     subgraph ExportTargets ["Downstream Export Sinks"]
-        TempoSink["Grafana Tempo (otlp/tempo gRPC 4317)"]
-        DebugSink["Debug Console (stdout)"]
+        TempoSink["Grafana Tempo - otlp tempo gRPC 4317"]
+        DebugSink["Debug Console - stdout"]
     end
 
     SDKClient -->|gRPC TLS Port 31418| GRPCReceiver
@@ -565,28 +565,42 @@ Internally, data traverses decoupled Go worker goroutines linked by bounded chan
 ```mermaid
 graph TD
     subgraph SocketRead ["Ingress Socket Processing"]
-        TCPPacket["Inbound Network Packets (Port 4317/4318)"] --> TLSDecrypt["TLS Decryption and HTTP/2 Frame Demux"]
-        TLSDecrypt --> ProtoParse["Protobuf Unmarshal into pdata.Traces"]
+        TCPPacket["Inbound Network Packets - Port 4317 and 4318"]
+        TLSDecrypt["TLS Decryption and HTTP/2 Frame Demux"]
+        ProtoParse["Protobuf Unmarshal into pdata.Traces"]
+        TCPPacket --> TLSDecrypt
+        TLSDecrypt --> ProtoParse
     end
 
     subgraph AdmissionGate ["Pipeline Admission Phase"]
-        ProtoParse --> LimiterEval{"Memory Limiter Check"}
-        LimiterEval -->|Over Limit| RejectBackpressure["Return gRPC RESOURCE_EXHAUSTED / HTTP 429"]
-        LimiterEval -->|Under Limit| ChannelPush["Push to Inbound Pipeline Channel"]
+        LimiterEval{"Memory Limiter Check"}
+        RejectBackpressure["Return gRPC RESOURCE_EXHAUSTED or HTTP 429"]
+        ChannelPush["Push to Inbound Pipeline Channel"]
+        LimiterEval -->|Over Limit| RejectBackpressure
+        LimiterEval -->|Under Limit| ChannelPush
     end
 
     subgraph ProcessorWorker ["Processor Execution Loop"]
-        ChannelPush --> OTTLWorker["OTTL Transformation Engine"]
-        OTTLWorker --> RegexExec["Regex String Replacement in pdata Maps"]
-        RegexExec --> BatchWorker["Batch Accumulator Slice"]
+        OTTLWorker["OTTL Transformation Engine"]
+        RegexExec["Regex String Replacement in pdata Maps"]
+        BatchWorker["Batch Accumulator Slice"]
+        OTTLWorker --> RegexExec
+        RegexExec --> BatchWorker
     end
 
     subgraph ExportDispatch ["Export Dispatch Loop"]
-        BatchWorker --> FlushTrigger{"Flush Threshold Reached?"}
-        FlushTrigger -->|Yes| MarshalExport["Marshal to OTLP Export Request"]
-        FlushTrigger -->|No| HoldBuffer["Hold in Active Arena"]
-        MarshalExport --> OutboundNet["gRPC Stream to llmobs-tempo:4317"]
+        FlushTrigger{"Flush Threshold Reached?"}
+        MarshalExport["Marshal to OTLP Export Request"]
+        HoldBuffer["Hold in Active Arena"]
+        OutboundNet["gRPC Stream to llmobs-tempo:4317"]
+        FlushTrigger -->|Yes| MarshalExport
+        FlushTrigger -->|No| HoldBuffer
+        MarshalExport --> OutboundNet
     end
+
+    ProtoParse --> LimiterEval
+    ChannelPush --> OTTLWorker
+    BatchWorker --> FlushTrigger
 
     style TCPPacket fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
     style TLSDecrypt fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
@@ -664,37 +678,30 @@ receivers:
 
 ```mermaid
 graph TD
-    subgraph ClientCallers ["Upstream Ingestion Sources"]
-        GRPCClient["Microservice Agents (Python / Go / Java)"]
-        BrowserClient["Single-Page Applications / Browser SDK"]
+    subgraph ClientCallers ["Upstream Sources"]
+        GRPCClient["Microservice Agents"]
+        BrowserClient["Browser SDKs"]
     end
 
-    subgraph SecurityBoundary ["Network Ingress Layer"]
-        TraefikProxy["Traefik Ingress Gateway (Port 443 / HTTPS)"]
-        DirectPortBridge["Docker Port Mappings (31417 and 31418)"]
+    subgraph SecurityBoundary ["Ingress Layer"]
+        TraefikProxy["Traefik Gateway"]
+        DirectPortBridge["Direct Port Mapping"]
     end
 
-    subgraph ProtocolHandlers ["Collector Protocol Handlers"]
-        GRPCHandler["gRPC Handler (HTTP/2 Framer / 0.0.0.0:4317)"]
-        HTTPHandler["HTTP Handler (REST Router / 0.0.0.0:4318)"]
+    subgraph ProtocolHandlers ["Collector Handlers"]
+        GRPCHandler["gRPC Handler"]
+        HTTPHandler["HTTP Handler"]
     end
 
-    GRPCClient -->|Direct gRPC TLS| DirectPortBridge
-    BrowserClient -->|HTTPS POST| TraefikProxy
-
+    GRPCClient --> DirectPortBridge
+    BrowserClient --> TraefikProxy
     DirectPortBridge --> GRPCHandler
     TraefikProxy --> HTTPHandler
-
-    GRPCHandler --> TracePipeline["Internal Trace Pipeline Consumer"]
+    GRPCHandler --> TracePipeline["Pipeline Consumer"]
     HTTPHandler --> TracePipeline
 
-    style GRPCClient fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
-    style BrowserClient fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
-    style TraefikProxy fill:#4a044e,stroke:#d946ef,stroke-width:2px,color:#f8fafc
-    style DirectPortBridge fill:#4a044e,stroke:#d946ef,stroke-width:2px,color:#f8fafc
-    style GRPCHandler fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
-    style HTTPHandler fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
-    style TracePipeline fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#f8fafc
+    style TraefikProxy fill:#4a044e,stroke:#d946ef
+    style DirectPortBridge fill:#4a044e,stroke:#d946ef
 ```
 
 ---
@@ -703,35 +710,38 @@ graph TD
 
 ```mermaid
 graph LR
-    subgraph SocketEstablishment ["TCP and Cryptographic Layer"]
-        SYN["TCP SYN / Handshake"] --> TLSHello["Client Hello (ALPN: h2, http/1.1)"]
-        TLSHello --> ServerCert["Present server.pem and Negotiate Cipher"]
-        ServerCert --> EncryptedStream["Encrypted Transport Established"]
+    subgraph SocketEstablishment ["TCP/TLS Layer"]
+        SYN["TCP Handshake"]
+        TLSHello["TLS Client Hello"]
+        ServerCert["Negotiate Cipher"]
+        EncryptedStream["Encrypted Transport"]
+        SYN --> TLSHello
+        TLSHello --> ServerCert
+        ServerCert --> EncryptedStream
     end
 
-    subgraph ProtocolDecoding ["Protocol Parsing Layer"]
-        EncryptedStream --> StreamDetect{"Transport Protocol"}
-        StreamDetect -->|gRPC or HTTP2| H2Framer["HTTP/2 Frame Reader Zero-Copy Buffer"]
-        StreamDetect -->|HTTP 1.1| RESTParser["HTTP Request Parser v1 traces"]
+    subgraph ProtocolDecoding ["Protocol Parser"]
+        StreamDetect{"Protocol Type"}
+        H2Framer["HTTP/2 Frame Reader"]
+        RESTParser["REST Parser"]
+        StreamDetect -->|gRPC/h2| H2Framer
+        StreamDetect -->|HTTP1| RESTParser
     end
 
-    subgraph MemoryMapping ["Memory Materialization"]
-        H2Framer --> ProtoDecode["Decode Protobuf to pdata.Traces"]
-        RESTParser --> JSONDecode["Decode JSON to pdata.Traces"]
-        ProtoDecode --> DispatchPipe["Dispatch to Pipeline Channels"]
+    subgraph MemoryMapping ["Materialization"]
+        ProtoDecode["Unmarshal Protobuf"]
+        JSONDecode["Unmarshal JSON"]
+        DispatchPipe["Pipeline Dispatch"]
+        ProtoDecode --> DispatchPipe
         JSONDecode --> DispatchPipe
     end
 
-    style SYN fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
-    style TLSHello fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
-    style ServerCert fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
-    style EncryptedStream fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#f8fafc
-    style StreamDetect fill:#4a044e,stroke:#d946ef,stroke-width:2px,color:#f8fafc
-    style H2Framer fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
-    style RESTParser fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
-    style ProtoDecode fill:#3b0764,stroke:#a855f7,stroke-width:2px,color:#f8fafc
-    style JSONDecode fill:#3b0764,stroke:#a855f7,stroke-width:2px,color:#f8fafc
-    style DispatchPipe fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#f8fafc
+    EncryptedStream --> StreamDetect
+    H2Framer --> ProtoDecode
+    RESTParser --> JSONDecode
+
+    style EncryptedStream fill:#064e3b,stroke:#10b981
+    style DispatchPipe fill:#064e3b,stroke:#10b981
 ```
 
 ---
@@ -785,71 +795,83 @@ processors:
       - GOMEMLIMIT=858993459
 ```
 
----
-
 ### 4.2 Memory Limiter High-Level Design (HLD): Threshold Gatekeeper
 
 ```mermaid
 graph TD
-    subgraph ContainerCeiling ["Linux Container Boundary (1024 MiB cgroup max)"]
-        subgraph OSBuffer ["Kernel and Stack Overhead (224 MiB Safety Zone)"]
-            subgraph HardLimitZone ["Hard Limit Boundary (limit_mib = 800 MiB)"]
-                subgraph SoftLimitZone ["Soft Limit Threshold (640 MiB)"]
-                    subgraph NormalZone ["Normal Ingestion (0 to 640 MiB)"]
-                        SpansPass["100% Telemetry Admitted Unthrottled"]
-                    end
-                    SpansSoft["Spike Burst Zone (Proportional Dropping and 429)"]
-                end
-                SpansHard["Hard Drop Zone (Immediate 100% Rejection)"]
-            end
-            NonHeap["OS Page Cache, Netty Sockets, Thread Stacks"]
-        end
+    subgraph Tier1 ["Normal Ingestion"]
+        NormalQuota["0-640 MiB Heap"]
+        SpansPass["Admitted"]
+        NormalQuota --> SpansPass
     end
 
-    style ContainerCeiling fill:#450a0a,stroke:#ef4444,stroke-width:2px,color:#f8fafc
-    style OSBuffer fill:#451a03,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
-    style HardLimitZone fill:#4a044e,stroke:#d946ef,stroke-width:2px,color:#f8fafc
-    style SoftLimitZone fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
-    style NormalZone fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#f8fafc
-    style SpansPass fill:#064e3b,stroke:#10b981,stroke-width:1px,color:#f8fafc
-    style SpansSoft fill:#451a03,stroke:#f59e0b,stroke-width:1px,color:#f8fafc
-    style SpansHard fill:#450a0a,stroke:#ef4444,stroke-width:1px,color:#f8fafc
-    style NonHeap fill:#1e293b,stroke:#3b82f6,stroke-width:1px,color:#f8fafc
-```
+    subgraph Tier2 ["Spike Burst"]
+        SoftQuota["640-800 MiB"]
+        SpansSoft["Proportional Drop"]
+        SoftQuota --> SpansSoft
+    end
 
----
+    subgraph Tier3 ["Hard Boundary"]
+        HardQuota["800 MiB Limit"]
+        SpansHard["Rejected"]
+        HardQuota --> SpansHard
+    end
+
+    SpansPass --> SoftQuota
+    SpansSoft --> HardQuota
+
+    style NormalQuota fill:#064e3b,stroke:#10b981
+    style SoftQuota fill:#451a03,stroke:#f59e0b
+    style HardQuota fill:#450a0a,stroke:#ef4444
+```
 
 ### 4.3 Memory Limiter Low-Level Design (LLD): Go GC Pacing vs Application Shedding
 
 ```mermaid
 graph TD
     subgraph MonitorLoop ["1-Second Ticker Evaluation Loop"]
-        Tick["Timer Ticks (check_interval: 1s)"] --> InspectHeap["Query runtime.ReadMemStats(m)"]
+        Tick["Timer Ticks - check_interval: 1s"] --> InspectHeap["Query runtime.ReadMemStats"]
         InspectHeap --> AllocHeap["Current Allocated Heap Bytes"]
     end
 
     subgraph StateLogic ["Threshold Evaluation"]
-        AllocHeap --> CheckSoft{"Allocated Heap Exceeds 640 MiB?"}
-        CheckSoft -->|No: Under 640 MiB| NormalMode["Mode: Pass All Spans"]
-        CheckSoft -->|Yes| CheckHard{"Allocated Heap Exceeds 800 MiB?"}
-        CheckHard -->|No: 640M to 800M| SoftMode["Mode: Proportional Dropping"]
-        CheckHard -->|Yes: Over 800M| HardMode["Mode: 100% Rejection"]
+        CheckSoft{"Allocated Heap Exceeds 640 MiB?"}
+        CheckHard{"Allocated Heap Exceeds 800 MiB?"}
+        NormalMode["Mode: Pass All Spans"]
+        SoftMode["Mode: Proportional Dropping"]
+        HardMode["Mode: 100% Rejection"]
+
+        CheckSoft -->|No: Under 640 MiB| NormalMode
+        CheckSoft -->|Yes| CheckHard
+        CheckHard -->|No: 640M to 800M| SoftMode
+        CheckHard -->|Yes: Over 800M| HardMode
     end
 
     subgraph GCPacing ["Go Runtime GC Coordination"]
-        SoftMode --> GCMarginCheck{"Heap >= GOMEMLIMIT (819.2 MiB)?"}
-        GCMarginCheck -->|Yes| ForcedGC["Go Runtime Enforces Aggressive GC Sweep"]
-        ForcedGC --> ReclaimBuffers["Reclaim Dead Trace Arenas"]
-        ReclaimBuffers --> AllocHeap
+        GCMarginCheck{"Heap GE GOMEMLIMIT 819.2 MiB?"}
+        ForcedGC["Go Runtime Enforces Aggressive GC Sweep"]
+        ReclaimBuffers["Reclaim Dead Trace Arenas"]
+
+        GCMarginCheck -->|Yes| ForcedGC
+        ForcedGC --> ReclaimBuffers
     end
 
     subgraph ClientEnforcement ["Client Response"]
-        NormalMode --> ForwardPipeline["Forward Spans to transform/pii_redaction"]
-        SoftMode --> ProbDrop{"Probabilistic Drop Calculation"}
+        ForwardPipeline["Forward Spans to transform and pii_redaction"]
+        ProbDrop{"Probabilistic Drop Calculation"}
+        DropSignal["Return HTTP 429 or gRPC RESOURCE_EXHAUSTED"]
+
         ProbDrop -->|Pass| ForwardPipeline
-        ProbDrop -->|Drop| DropSignal["Return HTTP 429 / gRPC RESOURCE_EXHAUSTED"]
-        HardMode --> DropSignal
+        ProbDrop -->|Drop| DropSignal
     end
+
+    AllocHeap --> CheckSoft
+    SoftMode --> GCMarginCheck
+    ReclaimBuffers -.-> AllocHeap
+
+    NormalMode --> ForwardPipeline
+    SoftMode --> ProbDrop
+    HardMode --> DropSignal
 
     style Tick fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
     style InspectHeap fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
@@ -929,9 +951,9 @@ processors:
 ```mermaid
 graph TD
     subgraph InboundTracePayload ["Incoming Raw Span"]
-        ResMeta["Resource Descriptors (Host, Cloud, Env)"]
-        SpanAttrs["Span Attributes (llm.prompt, completion)"]
-        SpanEvts["Span Events (Tool Invocations, Exceptions)"]
+        ResMeta["Resource Descriptors - Host, Cloud, Env"]
+        SpanAttrs["Span Attributes - llm.prompt, completion"]
+        SpanEvts["Span Events - Tool Invocations, Exceptions"]
     end
 
     subgraph GrammarExecution ["OTTL Statement Evaluator"]
@@ -942,7 +964,7 @@ graph TD
 
     subgraph SanitizedOutput ["Sanitized Trace Output"]
         CleanRes["Sanitized Resource Metadata"]
-        CleanSpan["Sanitized Span (Secrets Masked)"]
+        CleanSpan["Sanitized Span - Secrets Masked"]
         CleanEvents["Sanitized Event Payload"]
     end
 
@@ -972,14 +994,14 @@ graph TD
 ```mermaid
 graph LR
     subgraph BuildPhase ["Collector Startup"]
-        YAMLDoc["Parse YAML Statements"] --> CompileRE["Compile regexp.MustCompile()"]
+        YAMLDoc["Parse YAML Statements"] --> CompileRE["Compile regexp MustCompile"]
         CompileRE --> ASTNode["Construct OTTL Grammar AST Nodes"]
     end
 
     subgraph ExecPhase ["Per-Span Evaluation Loop"]
-        AttributeMap["Iterate map[string]pcommon.Value"] --> TypeCheck{"Value Type == String?"}
+        AttributeMap["Iterate pcommon.Value Map"] --> TypeCheck{"Value Type == String?"}
         TypeCheck -->|No| NextAttr["Skip Non-String Types"]
-        TypeCheck -->|Yes| ExecRegex["Execute compiledRE.ReplaceAllString()"]
+        TypeCheck -->|Yes| ExecRegex["Execute compiledRE ReplaceAllString"]
         ExecRegex --> OverwriteMap["In-Place Update in pdata Map"]
     end
 
@@ -1064,12 +1086,12 @@ graph LR
     end
 
     subgraph InjectorProcessors ["Metadata Enrichment Engine"]
-        AttrStage["attributes Processor (Upsert deployment.environment, service.namespace)"]
-        ResStage["resource Processor (Upsert infra.stack, infra.network)"]
+        AttrStage["attributes Processor - Upsert deployment.environment and service.namespace"]
+        ResStage["resource Processor - Upsert infra.stack and infra.network"]
     end
 
     subgraph StandardizedTrace ["Enriched Telemetry Record"]
-        TaggedTrace["Enriched Span Ready for Tempo / ClickHouse Indexing"]
+        TaggedTrace["Enriched Span Ready for Tempo and ClickHouse Indexing"]
     end
 
     RawTrace --> AttrStage
@@ -1097,11 +1119,12 @@ graph TD
     end
 
     subgraph ResourceMutation ["Resource Attribute Processing"]
-        MutateVal --> ResUpdate["Access pdata.Resource Map"]
-        InsertVal --> ResUpdate
-        ResUpdate --> AddInfraTags["Insert infra.stack and infra.network Tags"]
+        ResUpdate["Access pdata.Resource Map"] --> AddInfraTags["Insert infra.stack and infra.network Tags"]
         AddInfraTags --> ForwardNext["Forward to Batch Processor"]
     end
+
+    MutateVal --> ResUpdate
+    InsertVal --> ResUpdate
 
     style SpanIn fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
     style IterateActions fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
@@ -1164,12 +1187,12 @@ graph LR
     end
 
     subgraph BatchEngine ["Batch Staging Memory"]
-        Buffer["In-Memory Batch Arena (Capacity: 1024)"]
+        Buffer["In-Memory Batch Arena - Capacity 1024"]
         FlushTimer["1-Second Flush Timer Ticker"]
     end
 
     subgraph OutboundDispatch ["Outbound Network Flush"]
-        CombinedPayload["Combined Batch Payload (Up to 1024 Spans)"]
+        CombinedPayload["Combined Batch Payload - Up to 1024 Spans"]
         TempoEndpoint["Grafana Tempo Distributor"]
     end
 
@@ -1201,25 +1224,27 @@ graph LR
 graph TD
     subgraph InboundAppend ["Append Routine"]
         NewSpans["Inbound Spans Received"] --> MutexLock["Acquire sync.Mutex"]
-        MutexLock --> SliceAppend["activeBatch = append(activeBatch, newSpans...)"]
-        SliceAppend --> SizeCheck{"len(activeBatch) >= 1024?"}
+        MutexLock --> SliceAppend["activeBatch append newSpans"]
+        SliceAppend --> SizeCheck{"Batch Size GE 1024?"}
     end
 
     subgraph SwapFlush ["Atomic Buffer Swap"]
-        SizeCheck -->|Yes: Full| ResetTimer["Stop time.Timer"]
-        ResetTimer --> SwapBatch["batchToExport = activeBatch; activeBatch = make([]Span, 0, 1024)"]
+        ResetTimer["Stop time.Timer"] --> SwapBatch["Swap Buffer and Allocate Fresh Arena"]
         SwapBatch --> ReleaseMutex["Release sync.Mutex"]
         ReleaseMutex --> SendOutboundChannel["Send batchToExport to Exporter Goroutine"]
-
-        SizeCheck -->|No: Under 1024| ReleaseWait["Release sync.Mutex and Wait Next"]
+        ReleaseWait["Release sync.Mutex and Wait Next"]
     end
 
     subgraph TimerTicker ["Timer Routine"]
-        TimerExpires["time.Timer Ticks (1s)"] --> AcquireTimerMutex["Acquire sync.Mutex"]
-        AcquireTimerMutex --> LenCheck{"len(activeBatch) > 0?"}
-        LenCheck -->|Yes| SwapBatch
-        LenCheck -->|No: Empty Buffer| ReleaseTimerMutex["Reset Timer and Release Mutex"]
+        TimerExpires["Timer Ticks at 1s Interval"] --> AcquireTimerMutex["Acquire sync.Mutex"]
+        AcquireTimerMutex --> LenCheck{"Batch Size GT 0?"}
+        ReleaseTimerMutex["Reset Timer and Release Mutex"]
     end
+
+    SizeCheck -->|Yes: Full| ResetTimer
+    SizeCheck -->|No: Under 1024| ReleaseWait
+    LenCheck -->|Yes| SwapBatch
+    LenCheck -->|No: Empty Buffer| ReleaseTimerMutex
 
     style NewSpans fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
     style MutexLock fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
@@ -1293,11 +1318,11 @@ exporters:
 ```mermaid
 graph TD
     subgraph ProcessedTelemetry ["Batch Processor Output"]
-        BatchOut["Processed Span Batch (1024 Spans)"]
+        BatchOut["Processed Span Batch - 1024 Spans"]
     end
 
     subgraph InternalQueue ["Exporter Staging Buffer"]
-        SendingQ["In-Memory Queue (Capacity: 1000 Batches)"]
+        SendingQ["In-Memory Queue - Capacity 1000 Batches"]
     end
 
     subgraph WorkerPool ["Concurrent Exporter Workers"]
@@ -1308,8 +1333,8 @@ graph TD
     end
 
     subgraph Sinks ["Export Destinations"]
-        TempoGRPC["Grafana Tempo (llmobs-tempo:4317)"]
-        DebugOut["Console Debug Stream (stdout)"]
+        TempoGRPC["Grafana Tempo - Port 4317"]
+        DebugOut["Console Debug Stream - stdout"]
     end
 
     BatchOut --> SendingQ
@@ -1342,21 +1367,27 @@ graph TD
 ```mermaid
 graph TD
     subgraph DispatchAttempt ["Export Dispatch"]
-        DequeueBatch["Dequeue Batch from sending_queue"] --> CallExport["Invoke gRPC ExportTracesService.Export()"]
+        DequeueBatch["Dequeue Batch from sending_queue"] --> CallExport["Invoke gRPC ExportTracesService Export"]
         CallExport --> ResponseCheck{"Tempo Response"}
     end
 
     subgraph SuccessPath ["Success Path"]
-        ResponseCheck -->|Status OK| AckBatch["Acknowledge and Release Batch Memory"]
+        AckBatch["Acknowledge and Release Batch Memory"]
     end
 
     subgraph RetryStateMachine ["Exponential Backoff Retry Engine"]
-        ResponseCheck -->|Transient Error 503| CheckElapsed{"Elapsed Time Under 5m?"}
-        CheckElapsed -->|Yes| CalcBackoff["Calculate Exponential Backoff Interval"]
-        CalcBackoff --> SleepWait["time.Sleep with Jitter"]
-        SleepWait --> CallExport
-        CheckElapsed -->|No: Timeout Breached| DropBatch["Drop Batch and Increment Dropped Counter"]
+        CheckElapsed{"Elapsed Time Under 5m?"}
+        CalcBackoff["Calculate Exponential Backoff Interval"]
+        SleepWait["time.Sleep with Jitter"]
+        DropBatch["Drop Batch and Increment Dropped Counter"]
+        CheckElapsed -->|Yes| CalcBackoff
+        CalcBackoff --> SleepWait
+        CheckElapsed -->|No: Timeout Breached| DropBatch
     end
+
+    ResponseCheck -->|Status OK| AckBatch
+    ResponseCheck -->|Transient Error 503| CheckElapsed
+    SleepWait -.->|Retry Dispatch| CallExport
 
     style DequeueBatch fill:#3b0764,stroke:#a855f7,stroke-width:2px,color:#f8fafc
     style CallExport fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
@@ -1422,12 +1453,12 @@ graph LR
     end
 
     subgraph EdgeProxy ["Traefik Reverse Proxy Gateway"]
-        TLSHandler["TLS Termination (websecure / Port 443)"]
-        MiddlewareStack["Middleware Filter Stack (Rate Limit / Payload Limit)"]
+        TLSHandler["TLS Termination - websecure on Port 443"]
+        MiddlewareStack["Middleware Filter Stack - Rate Limit and Payload Limit"]
     end
 
-    subgraph InternalServices ["Docker Bridge Network (llmobs-network)"]
-        OTelHTTP["Collector OTLP HTTP (Port 4318 HTTPS)"]
+    subgraph InternalServices ["Docker Bridge Network - llmobs-network"]
+        OTelHTTP["Collector OTLP HTTP - Port 4318 HTTPS"]
     end
 
     WebUser -->|HTTPS Request| TLSHandler
@@ -1450,18 +1481,20 @@ graph LR
 ```mermaid
 graph TD
     subgraph RequestIngress ["Request Arrival"]
-        InboundHTTPS["Inbound POST /v1/traces"] --> HostRouter{"Host Header Match?"}
+        InboundHTTPS["Inbound POST v1 traces"] --> HostRouter{"Host Header Match?"}
         HostRouter -->|Matches llmobs.otel| SecHeaders["Apply security-headers Middleware"]
         HostRouter -->|Mismatch| Reject404["Return 404 Not Found"]
     end
 
     subgraph MiddlewareChain ["Middleware Filter Execution"]
-        SecHeaders --> RateLimit{"Evaluate rate-limit-ingest (Max Req/Sec)"}
+        RateLimit{"Evaluate rate-limit-ingest - Max Req per Sec"}
         RateLimit -->|Exceeded| Reject429["Return 429 Too Many Requests"]
         RateLimit -->|Within Limit| PayloadCheck{"Evaluate Body Size Under 10MB"}
         PayloadCheck -->|Exceeded| Reject413["Return 413 Payload Too Large"]
-        PayloadCheck -->|Within Limit| ForwardBackend["Proxy to http://llmobs-otel-collector:4318"]
+        PayloadCheck -->|Within Limit| ForwardBackend["Proxy to llmobs-otel-collector on Port 4318"]
     end
+
+    SecHeaders --> RateLimit
 
     style InboundHTTPS fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
     style HostRouter fill:#4a044e,stroke:#d946ef,stroke-width:2px,color:#f8fafc
@@ -1527,9 +1560,9 @@ service:
 ```mermaid
 graph LR
     subgraph CollectorInternal ["Collector Daemon Internals"]
-        HealthExt["health_check Extension (Port 13133)"]
-        ZPagesExt["zpages Extension (Port 55679)"]
-        MetricsServer["Prometheus Exporter (Port 8888)"]
+        HealthExt["health_check Extension - Port 13133"]
+        ZPagesExt["zpages Extension - Port 55679"]
+        MetricsServer["Prometheus Exporter - Port 8888"]
     end
 
     subgraph MonitorClients ["Monitoring Infrastructure"]
@@ -1557,21 +1590,22 @@ graph LR
 ```mermaid
 graph TD
     subgraph RuntimeMeters ["Go Runtime and Collector Meters"]
-        HeapGauge["runtime.ReadMemStats: Alloc, Sys, NumGC"]
+        HeapGauge["runtime.ReadMemStats - Alloc, Sys, NumGC"]
         SpanCounters["pipeline.refused_spans, batch_send_size"]
     end
 
     subgraph OpenTelemetryMetricsRegistry ["Internal Metrics Registry"]
         Registry["Prometheus Metrics Collector Registry"]
-        HeapGauge --> Registry
-        SpanCounters --> Registry
     end
 
     subgraph HTTPScrapeEndpoint ["HTTP Scrape Handler"]
-        ScrapeReq["Incoming GET /metrics"] --> Formatter["Format Metrics to Prometheus Text Format"]
-        Registry --> Formatter
+        ScrapeReq["Incoming GET metrics"] --> Formatter["Format Metrics to Prometheus Text Format"]
         Formatter --> StreamResp["Stream HTTP 200 Response"]
     end
+
+    HeapGauge --> Registry
+    SpanCounters --> Registry
+    Registry --> Formatter
 
     style HeapGauge fill:#3b0764,stroke:#a855f7,stroke-width:2px,color:#f8fafc
     style SpanCounters fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
@@ -1633,12 +1667,12 @@ services:
 ```mermaid
 graph TD
     subgraph IngressLayer ["Ingress Load Balancer"]
-        TraefikCluster["Traefik Reverse Proxy (Round-Robin with Health Check)"]
+        TraefikCluster["Traefik Reverse Proxy - Round-Robin with Health Check"]
     end
 
     subgraph GatewayPool ["Horizontal Collector Instance Pool"]
-        CollectorA["llmobs-otel-collector-1 (2048M cgroup / GOMEMLIMIT 1.6G)"]
-        CollectorB["llmobs-otel-collector-2 (2048M cgroup / GOMEMLIMIT 1.6G)"]
+        CollectorA["llmobs-otel-collector-1 - 2048M cgroup - GOMEMLIMIT 1.6G"]
+        CollectorB["llmobs-otel-collector-2 - 2048M cgroup - GOMEMLIMIT 1.6G"]
     end
 
     subgraph BackendStoragePool ["Distributed Storage Sinks"]
@@ -1674,14 +1708,18 @@ graph LR
     end
 
     subgraph NodeForwarding ["Target Dispatch"]
-        RouteDecision -->|Replica 0| Node0["Route to Collector Instance 1"]
-        RouteDecision -->|Replica 1| Node1["Route to Collector Instance 2"]
+        Node0["Route to Collector Instance 1"]
+        Node1["Route to Collector Instance 2"]
     end
 
     subgraph MemoryPacing ["Scaled Node Memory Profile"]
-        Node0 --> SizingProfile["Limit: 2048M, limit_mib: 1600, spike: 320, GOMEMLIMIT: 1.6G"]
-        Node1 --> SizingProfile
+        SizingProfile["Limit: 2048M, limit_mib: 1600, spike: 320, GOMEMLIMIT: 1.6G"]
     end
+
+    RouteDecision -->|Replica 0| Node0
+    RouteDecision -->|Replica 1| Node1
+    Node0 --> SizingProfile
+    Node1 --> SizingProfile
 
     style TraceIn fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
     style HashFunc fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
@@ -1763,7 +1801,7 @@ graph TD
     subgraph RemediationAction ["Remediation Workflows"]
         FixOOM["Apply GOMEMLIMIT and Calibrate limit_mib to 800 MiB"]
         FixTempo["Restart Tempo and Flush Pending Exporter Queue"]
-        ScaleOut["Deploy Production Profile (docker-compose.prod.yml)"]
+        ScaleOut["Deploy Production Profile - docker-compose.prod.yml"]
     end
 
     Alert --> CheckOOM
