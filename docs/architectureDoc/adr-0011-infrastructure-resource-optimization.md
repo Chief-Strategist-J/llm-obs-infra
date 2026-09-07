@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Document ID** | ADR-0011 |
-| **Status** | **Partially Implemented** — 5 of 10 delivered, 1 ineffective, 4 pending (see §6) |
+| **Status** | **Partially Implemented** — 6 of 10 delivered, 1 ineffective, 3 pending (see §6) |
 | **Author(s)** | Principal Infrastructure Architect |
 | **Target Repository** | `Chief-Strategist-J/llm-obs-infra` |
 | **Date** | 2026-09-07 |
@@ -338,9 +338,9 @@ A 4 GB Docker container is already an aggressive constraint for ClickHouse on a 
 
 | Category | Count |
 |---|---|
-| ✅ **Delivered** (of the 10 original decisions) | **5** |
+| ✅ **Delivered** (of the 10 original decisions) | **6** |
 | ⚠️ **Written but ineffective** | **1** |
-| ⬜ **Pending** | **4** |
+| ⬜ **Pending** | **3** |
 | ➕ **Delivered beyond original scope** (found while implementing) | **12** |
 
 ### 6.2 Delivered
@@ -350,6 +350,7 @@ A 4 GB Docker container is already an aggressive constraint for ClickHouse on a 
 | 1 | Kafka `KAFKA_HEAP_OPTS` | `docker-compose.yml:115`, `docker-compose.prod.yml:12` | Done. The *reason* stated in Decision 1 is wrong — see §7 |
 | 2 | ClickHouse `mark_cache_size` | `config.d/custom.xml:57` = `536870912` | Superseded and expanded by [ADR-0012](adr-0012-clickhouse-configuration.md) |
 | 3 | OTel Collector `limit_mib` + container limit | `otel-collector-config.yaml`, `docker-compose.yml` | Delivered under [ADR-0013](adr-0013-otel-collector-configuration.md) |
+| 4 | Memory limits on Temporal, Tempo, Grafana, Traefik, Service Registry | `docker-compose.yml` | **Delivered.** Added `deploy.resources` limits and reservations (Temporal: 1024M, Tempo: 1024M, Grafana: 512M, Traefik: 256M, Service Registry: 128M) |
 | 8 | ClickHouse concurrency + per-query caps | `config.d/custom.xml:37`, `users.d/override.xml` | Superseded by ADR-0012. `dev-limits.xml` deliberately **not** created |
 | 9 | AlloyDB `max_connections` / `work_mem` | `postgresql.conf:53,84` | **Revised:** `max_connections = 80`, not the proposed 60. AlloyDB sets `superuser_reserved_connections = 30`, so 60 would have left a non-superuser role exactly Temporal's 30 with zero headroom |
 
@@ -367,7 +368,6 @@ This is the same class of defect as AlloyDB's unmounted `postgresql.conf` (§6.5
 
 | # | Decision | Current state | Impact |
 |---|---|---|---|
-| 4 | Memory limits on Temporal, Tempo, Grafana, Traefik, Service Registry | **All five still unbounded** | Any one can still OOM the host. This was the single largest item in the ADR |
 | 5 | Redis container memory limit | No `deploy.resources` block on `llmobs-redis` | `maxmemory 256mb` bounds the dataset but not the AOF-rewrite fork spike |
 | 6 | Redis explicit AOF settings + `maxmemory-clients` | `redis.conf` has only `maxmemory` and `maxmemory-policy` | Defaults apply and are unpinned across version upgrades |
 | 10 | Docker log caps `50m→10m`, `100m→20m` | Still `50m` x `3` and `100m` x `10` | Theoretical ceiling remains ~2.35 GB |
@@ -430,7 +430,7 @@ the running software.
 | 1 | Fix `KAFKA_JVM_PERFORMANCE_OPTS` → `KAFKA_HEAP_OPTS` | `docker-compose.yml` | ✅ Done |
 | 2 | Add ClickHouse `mark_cache_size=512MiB` | `config/clickhouse/config.d/custom.xml` | ✅ Superseded by ADR-0012 |
 | 3 | Fix OTel Collector container limit + `limit_mib` ratio | `docker-compose.yml`, `config/otel-collector/otel-collector-config.yaml` | ✅ Implemented (see [ADR-0013](adr-0013-otel-collector-configuration.md)) |
-| 4 | Add Docker limits to Temporal, Tempo, Grafana, Traefik, Registry | `docker-compose.yml` | ⬜ **Pending** — all five still unbounded |
+| 4 | Add Docker limits to Temporal, Tempo, Grafana, Traefik, Registry | `docker-compose.yml` | ✅ Done |
 | 5 | Add Redis Docker container limit (512M) | `docker-compose.yml` | ⬜ **Pending** |
 | 6 | Explicit Redis AOF settings + `maxmemory-clients` | `config/redis/redis.conf` | ⬜ **Pending** |
 | 7 | Kafka log retention + segment size tuning | `config/kafka/server.properties` | ⚠️ **Written but ineffective** — see §6.3 |

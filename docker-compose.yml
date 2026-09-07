@@ -17,6 +17,12 @@ services:
     container_name: llmobs-traefik-gateway
     restart: unless-stopped
     logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
@@ -169,6 +175,12 @@ services:
     container_name: llmobs-tempo-tracing
     restart: unless-stopped
     logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 128M
     command: ["-config.file=/etc/tempo/tempo-config.yaml"]
     environment:
       - OTEL_SERVICE_NAME=llmobs-tempo-tracing
@@ -228,6 +240,12 @@ services:
     container_name: llmobs-grafana-portal
     restart: unless-stopped
     logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
     ports:
       - "${PORT_GRAFANA:-31415}:3000"
     environment:
@@ -320,6 +338,12 @@ services:
     container_name: llmobs-temporal-engine
     restart: unless-stopped
     logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 256M
     ports:
       - "${PORT_TEMPORAL_GRPC:-31424}:7233"
       - "127.0.0.1:${PORT_TEMPORAL_UI:-31425}:8080"
@@ -361,6 +385,12 @@ services:
     container_name: llmobs-service-registry
     restart: always
     logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
     ports:
       - "${PORT_SERVICE_REGISTRY:-31426}:31426"
     environment:
