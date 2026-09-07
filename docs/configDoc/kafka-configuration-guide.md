@@ -430,7 +430,7 @@ graph TB
     end
 
     subgraph BrokerInternals ["Broker Internal Execution"]
-        P_Send -->|TCP Produce Request| B_Net["Acceptor and Network Threads"]
+        B_Net["Acceptor and Network Threads"]
         B_Net --> B_ReqQ["Request Queue"]
         B_ReqQ --> B_Worker["KafkaRequestHandler Worker Threads"]
         B_Worker --> B_Heap["JVM Heap Metadata"]
@@ -440,12 +440,15 @@ graph TB
     end
 
     subgraph ConsumerInternals ["Consumer Client Execution"]
-        B_PageCache -->|Zero-Copy sendfile| C_Fetch["Consumer Fetcher Thread"]
+        C_Fetch["Consumer Fetcher Thread"]
         C_Fetch --> C_Buf["CompletedFetch Queue"]
         C_Buf --> C_Poll["Consumer poll Loop"]
         C_Poll --> C_Commit["Offset Commit Manager (__consumer_offsets)"]
-        C_Commit -->|Commit Offsets| B_Net
     end
+
+    P_Send -->|TCP Produce Request| B_Net
+    B_PageCache -->|Zero-Copy sendfile| C_Fetch
+    C_Commit -->|Commit Offsets| B_Net
 
     style P_App fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style P_Ser fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -520,12 +523,15 @@ graph TD
     KRaftPeer["KRaft Controller Quorum Peers"] -->|Port 9093| ControllerListener["Controller Listener"]
 
     subgraph BrokerCoreEngine ["llmobs-kafka Broker Process"]
-        SocketListener --> NetPool["Network Processing Pool"]
-        ControllerListener --> KRaftEngine["KRaft Metadata Engine (@metadata)"]
+        NetPool["Network Processing Pool"]
+        KRaftEngine["KRaft Metadata Engine (@metadata)"]
         NetPool --> WorkPool["I/O Request Handler Pool"]
         WorkPool --> MemoryMgr["Memory Manager (Heap vs OS Page Cache)"]
         MemoryMgr --> LogEngine["Partition Log Storage Engine"]
     end
+
+    SocketListener --> NetPool
+    ControllerListener --> KRaftEngine
 
     style Client fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style KRaftPeer fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
@@ -578,21 +584,21 @@ graph TB
     Acceptor -->|NIO Select| NetThread1
     Acceptor -->|NIO Select| NetThread2
 
-    NetThread1 -->|Enqueue Request| RequestQueue
-    NetThread2 -->|Enqueue Request| RequestQueue
+    NetThread1 --> RequestQueue
+    NetThread2 --> RequestQueue
 
-    RequestQueue -->|Dequeue Request| IOThread1
-    RequestQueue -->|Dequeue Request| IOThread2
+    RequestQueue --> IOThread1
+    RequestQueue --> IOThread2
 
-    IOThread1 -->|Heap Allocation| JVMHeap
-    IOThread1 -->|Direct Buffer| NativeMem
-    IOThread1 -->|Zero-Copy Write| PageCache
-    IOThread2 -->|Zero-Copy Write| PageCache
+    IOThread1 --> JVMHeap
+    IOThread1 --> NativeMem
+    IOThread1 --> PageCache
+    IOThread2 --> PageCache
 
-    PageCache -->|OS Flush| LogFile
-    PageCache -->|OS Flush| IndexFile
-    PageCache -->|OS Flush| TimeIndex
-    PageCache -->|OS Flush| EpochFile
+    PageCache --> LogFile
+    PageCache --> IndexFile
+    PageCache --> TimeIndex
+    PageCache --> EpochFile
 
     style Acceptor fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style NetThread1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
@@ -688,10 +694,11 @@ graph TD
     Partitioner --> RecordAccumulator["RecordAccumulator (Memory Buffer)"]
 
     subgraph BackgroundProcessing ["Background I/O Thread"]
-        RecordAccumulator --> SenderThread["Sender Thread"]
+        SenderThread["Sender Thread"]
         SenderThread --> SocketChannel["Network Client and SocketChannel"]
     end
 
+    RecordAccumulator --> SenderThread
     SocketChannel -->|TCP Produce Request| KafkaBroker["llmobs-kafka Broker"]
 
     style AppThread fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -1014,7 +1021,7 @@ graph TD
     subgraph PartitionerEngine ["Kafka Partitioner Architecture"]
         Record["ProducerRecord (Key, Value)"] --> CheckKey{"Record Key Provided?"}
         CheckKey -->|Yes| MurmurHash["MurmurHash2 Algorithm (to32Bits)"]
-        MurmurHash --> ModuloOp["(hash & 0x7fffffff) % num_partitions"]
+        MurmurHash --> ModuloOp["hash AND 0x7fffffff MOD num_partitions"]
         ModuloOp --> TargetPartition["Target Partition ID"]
 
         CheckKey -->|No| StickyPartitioner["Sticky Partitioner (Batch Pool)"]
@@ -1255,10 +1262,14 @@ graph TD
     end
 
     subgraph PhysicalDiskStorage ["Physical Disk Directory Structure"]
-        P0 --> D0["/var/lib/kafka/data/llmobs-spans-0/"]
-        P1 --> D1["/var/lib/kafka/data/llmobs-spans-1/"]
-        P2 --> D2["/var/lib/kafka/data/llmobs-spans-2/"]
+        D0["/var/lib/kafka/data/llmobs-spans-0/"]
+        D1["/var/lib/kafka/data/llmobs-spans-1/"]
+        D2["/var/lib/kafka/data/llmobs-spans-2/"]
     end
+
+    P0 --> D0
+    P1 --> D1
+    P2 --> D2
 
     style P0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style P1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
@@ -1388,12 +1399,12 @@ eos_consumer = Consumer({
 ```mermaid
 graph TD
     subgraph IdempotentProtocol ["Idempotent Producer Protocol"]
-        P1["Producer Client (enable.idempotence=true)"] -->|"1. Allocate Producer ID - PID"| B1["Broker Sequence Tracker"]
-        P1 -->|"2. Send Record Batch - PID 101 Seq 0"| B1
-        B1 -->|"3. Persist Batch Seq 0"| S1["Partition Log"]
-        B1 -.->|"4. Network ACK Drops or Times Out"| P1
-        P1 -->|"5. Retry Batch - PID 101 Seq 0"| B1
-        B1 -->|"6. Detect Duplicate Seq 0"| D1["Discard Duplicate Payload and Re-ACK"]
+        P1["Producer Client (enable.idempotence=true)"] -->|1. Allocate Producer ID - PID| B1["Broker Sequence Tracker"]
+        P1 -->|2. Send Record Batch - PID 101 Seq 0| B1
+        B1 -->|3. Persist Batch Seq 0| S1["Partition Log"]
+        B1 -.->|4. Network ACK Drops or Times Out| P1
+        P1 -->|5. Retry Batch - PID 101 Seq 0| B1
+        B1 -->|6. Detect Duplicate Seq 0| D1["Discard Duplicate Payload and Re-ACK"]
     end
 
     style P1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -1515,7 +1526,7 @@ graph LR
 ```mermaid
 graph TB
     subgraph LogCleanerLLD ["Log Cleaner Thread Low-Level Execution"]
-        ScanTrigger["Cleaner Trigger (dirty ratio >= 0.5)"] --> BuildMap["Build In-Memory Skimpy Offset Map"]
+        ScanTrigger["Cleaner Trigger (dirty ratio GTE 0.5)"] --> BuildMap["Build In-Memory Skimpy Offset Map"]
         BuildMap --> ScanDirty["Scan Dirty Log Segments"]
         ScanDirty --> DedupeKeys["Keep Highest Offset Per Message Key"]
         DedupeKeys --> WriteClean["Write Compacted Records to Clean Segment"]
@@ -1702,10 +1713,10 @@ docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
 
 ```mermaid
 graph TD
-    subgraph IncidentDetection ["Incident Detection & Alerts"]
-        Alert1["Disk Utilization > 90% Alert"]
-        Alert2["Under-Replicated Partitions > 0 Alert"]
-        Alert3["Consumer Lag > Threshold Alert"]
+    subgraph IncidentDetection ["Incident Detection and Alerts"]
+        Alert1["Disk Utilization GT 90% Alert"]
+        Alert2["Under-Replicated Partitions GT 0 Alert"]
+        Alert3["Consumer Lag GT Threshold Alert"]
     end
 
     subgraph KafkaAdminTooling ["Native Kafka CLI Diagnostic Engine"]
@@ -1765,7 +1776,7 @@ graph TB
     end
 
     subgraph URPIncidentLLD ["Incident 2: Under-Replicated Partitions Remediation Flow"]
-        URPAlert["URP Count > 0 Detected"] --> FindPartition["Execute kafka-topics.sh --under-replicated-partitions"]
+        URPAlert["URP Count GT 0 Detected"] --> FindPartition["Execute kafka-topics.sh --under-replicated-partitions"]
         FindPartition --> CheckBroker["Identify Failed Broker / Unhealthy Disk"]
         CheckBroker --> TriggerRebind["Execute kafka-reassign-partitions.sh"]
         TriggerRebind --> ReplicaFetch["Replica Re-Syncs Data from Leader"]
@@ -1972,15 +1983,18 @@ graph TD
     end
 
     subgraph BrokerAuth ["Broker Authorization Engine"]
-        TLSLayer -->|Authenticated Principal| ACLEvaluator["ACL Evaluator"]
+        ACLEvaluator["ACL Evaluator"]
         ACLEvaluator -->|Lookup| ACLStore["ACL Store (Metadata Log)"]
         ACLEvaluator -->|Allow| BrokerHandler["Request Handler"]
         ACLEvaluator -->|Deny| AuthError["Authorization Error Response"]
     end
 
     subgraph InterBroker ["Inter-Broker Communication"]
-        BrokerHandler -->|SASL SSL| Broker2["Replica Broker"]
+        Broker2["Replica Broker"]
     end
+
+    TLSLayer -->|Authenticated Principal| ACLEvaluator
+    BrokerHandler -->|SASL SSL| Broker2
 
     style Producer fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style Consumer fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -2125,12 +2139,14 @@ graph LR
     end
 
     subgraph MetricPipeline ["Metric Collection Pipeline"]
-        JMXPort -->|JMX Protocol| Exporter["JMX Exporter (Sidecar)"]
-        Exporter -->|HTTP /metrics| Prometheus["Prometheus Server"]
+        Exporter["JMX Exporter (Sidecar)"]
+        Exporter -->|HTTP metrics endpoint| Prometheus["Prometheus Server"]
         Prometheus -->|PromQL Queries| Grafana["Grafana Dashboard"]
         Prometheus -->|Alert Rules| AlertMgr["Alertmanager"]
-        AlertMgr -->|Webhook/Email| OnCall["On-Call Notification"]
+        AlertMgr -->|Webhook or Email| OnCall["On-Call Notification"]
     end
+
+    JMXPort -->|JMX Protocol| Exporter
 
     style JVMMetrics fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style BrokerMetrics fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -2152,12 +2168,12 @@ graph TB
     subgraph AlertDecisionEngine ["Prometheus Alert Rule Decision Engine"]
         URP["kafka_server_under_replicated_partitions"] -->|Value GT 0 for 2m| URPAlert["CRITICAL: Under-Replicated Partitions"]
         ActiveCtrl["kafka_controller_active_controller_count"] -->|Value NE 1| CtrlAlert["CRITICAL: No Active Controller"]
-        BytesIn["kafka_server_broker_topic_metrics_BytesInPerSec"] -->|GT 50MB/s for 5m| ThroughputAlert["WARNING: High Ingestion Rate"]
+        BytesIn["kafka_server_broker_topic_metrics_BytesInPerSec"] -->|GT 50MBps for 5m| ThroughputAlert["WARNING: High Ingestion Rate"]
         ReqIdle["kafka_network_request_handler_avg_idle_percent"] -->|LT 0.2 for 5m| ThreadAlert["WARNING: Request Handler Exhaustion"]
         GCPause["jvm_gc_pause_seconds_max"] -->|GT 0.5s| GCAlert["WARNING: Long GC Pauses"]
-        HeapUsed["jvm_memory_used_bytes (heap)"] -->|GT 80% of max| HeapAlert["WARNING: High Heap Usage"]
+        HeapUsed["jvm_memory_used_bytes (heap)"] -->|GT 80 pct of max| HeapAlert["WARNING: High Heap Usage"]
         ConsumerLag["kafka_consumer_lag"] -->|GT 10000 for 10m| LagAlert["WARNING: Consumer Lag Growing"]
-        DiskUsage["node_filesystem_avail_bytes"] -->|LT 10% free| DiskAlert["CRITICAL: Disk Space Low"]
+        DiskUsage["node_filesystem_avail_bytes"] -->|LT 10 pct free| DiskAlert["CRITICAL: Disk Space Low"]
     end
 
     style URP fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -2441,7 +2457,7 @@ graph TD
     subgraph QuotaArchitecture ["Kafka Quota Enforcement Architecture"]
         ClientReq["Client Produce/Fetch Request"] --> ReqHandler["Request Handler Thread"]
         ReqHandler --> QuotaMgr["ClientQuotaManager"]
-        QuotaMgr --> LookupQuota["Lookup Quota: User > Client ID > Default"]
+        QuotaMgr --> LookupQuota["Lookup Quota: User to Client ID to Default"]
         LookupQuota --> CheckRate{"Current Rate Exceeds Quota?"}
         CheckRate -->|No| ProcessNormal["Process Request Normally"]
         CheckRate -->|Yes| CalcThrottle["Calculate Throttle Time"]
@@ -2707,13 +2723,13 @@ docker exec -it llmobs-kafka-broker kafka-topics.sh \
 ```mermaid
 graph TD
     subgraph RackAwareCluster ["Multi-AZ Kafka Cluster with Rack Awareness"]
-        subgraph AZA ["Availability Zone A (broker.rack=az-a)"]
+        subgraph AZA ["Availability Zone A - broker.rack=az-a"]
             Broker1["Broker 1: P0-Leader, P1-Replica, P2-Replica"]
         end
-        subgraph AZB ["Availability Zone B (broker.rack=az-b)"]
+        subgraph AZB ["Availability Zone B - broker.rack=az-b"]
             Broker2["Broker 2: P0-Replica, P1-Leader, P2-Replica"]
         end
-        subgraph AZC ["Availability Zone C (broker.rack=az-c)"]
+        subgraph AZC ["Availability Zone C - broker.rack=az-c"]
             Broker3["Broker 3: P0-Replica, P1-Replica, P2-Leader"]
         end
     end
@@ -2837,8 +2853,8 @@ graph LR
     subgraph KafkaIOPath ["Kafka I/O Path Through Linux Kernel"]
         ProducerWrite["Producer Write Request"] --> BrokerAppend["Broker: Append to Active Segment"]
         BrokerAppend --> PageCache["Linux OS Page Cache (RAM)"]
-        PageCache -->|Background Flush (dirty_background_ratio)| DiskWrite["Disk Write (fsync)"]
-        PageCache -->|Forced Flush (dirty_ratio 80%)| DiskWrite
+        PageCache -->|Background Flush dirty_background_ratio| DiskWrite["Disk Write via fsync"]
+        PageCache -->|Forced Flush dirty_ratio 80 pct| DiskWrite
 
         ConsumerRead["Consumer Fetch Request"] --> ZeroCopy["sendfile() System Call"]
         ZeroCopy --> PageCache
@@ -3161,15 +3177,18 @@ graph LR
     end
 
     subgraph DRSetup ["Disaster Recovery Pipeline"]
-        PrimaryCluster -->|MirrorMaker 2 Replication| MM2["MM2 Connect Workers"]
-        MM2 -->|Replicated Topics| DRCluster["DR Kafka Cluster"]
-        MM2 -->|Heartbeat Topic| DRCluster
-        MM2 -->|Checkpoint Topic (Offset Translation)| DRCluster
+        MM2["MM2 Connect Workers"]
     end
 
     subgraph DRDC ["DR Data Center"]
+        DRCluster["DR Kafka Cluster"]
         DRCluster --> ConsumerDR["Consumer Groups (Standby)"]
     end
+
+    PrimaryCluster -->|MirrorMaker 2 Replication| MM2
+    MM2 -->|Replicated Topics| DRCluster
+    MM2 -->|Heartbeat Topic| DRCluster
+    MM2 -->|Checkpoint Topic - Offset Translation| DRCluster
 
     style ProdApp fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style PrimaryCluster fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
@@ -3298,7 +3317,7 @@ curl -X PUT -H "Content-Type: application/vnd.schemaregistry.v1+json" \
 graph TD
     subgraph SchemaFlow ["Schema Registry Serialization Flow"]
         Producer["Producer Application"] -->|Serialize Record| Serializer["Avro/JSON Schema Serializer"]
-        Serializer -->|Register/Lookup Schema| Registry["Schema Registry (Port 8081)"]
+        Serializer -->|Register or Lookup Schema| Registry["Schema Registry Port 8081"]
         Registry -->|Return Schema ID| Serializer
         Serializer -->|Magic Byte + Schema ID + Payload| KafkaBroker["Kafka Broker"]
 
@@ -3309,8 +3328,10 @@ graph TD
     end
 
     subgraph SchemaStore ["Schema Storage"]
-        Registry -->|Persist Schemas| SchemasTopic["_schemas Internal Topic"]
+        SchemasTopic["_schemas Internal Topic"]
     end
+
+    Registry -->|Persist Schemas| SchemasTopic
 
     style Producer fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style Serializer fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
@@ -3456,9 +3477,11 @@ graph LR
         AggregateProcessor --> SinkTopic["Sink Topic: llmobs-aggregated-metrics"]
     end
 
-    subgraph StandbyReplica ["Standby Replica (num.standby.replicas=1)"]
-        ChangelogTopic --> StandbyStore["Standby RocksDB State Store"]
+    subgraph StandbyReplica ["Standby Replica - num.standby.replicas=1"]
+        StandbyStore["Standby RocksDB State Store"]
     end
+
+    ChangelogTopic --> StandbyStore
 
     style SourceTopic fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style StreamThread fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
