@@ -1646,6 +1646,110 @@ docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
 
 ---
 
+### 10.4 Emergency Operational Workflow High-Level Design (HLD)
+
+```mermaid
+graph TD
+    subgraph IncidentDetection ["Incident Detection & Alerts"]
+        Alert1["Disk Utilization > 90% Alert"]
+        Alert2["Under-Replicated Partitions > 0 Alert"]
+        Alert3["Consumer Lag > Threshold Alert"]
+    end
+
+    subgraph KafkaAdminTooling ["Native Kafka CLI Diagnostic Engine"]
+        LogDirsCLI["kafka-logdirs.sh --describe"]
+        TopicsCLI["kafka-topics.sh --describe --under-replicated-partitions"]
+        ConsumerCLI["kafka-consumer-groups.sh --describe"]
+    end
+
+    subgraph RemediationEngine ["Dynamic Remediation & Recovery Execution"]
+        ConfigsCLI["kafka-configs.sh --alter --add-config retention.ms"]
+        ReassignCLI["kafka-reassign-partitions.sh --execute"]
+        ResetOffsetCLI["kafka-consumer-groups.sh --reset-offsets --to-latest"]
+    end
+
+    subgraph ClusterRecovery ["Cluster & Ingest Stabilization"]
+        StorageReclaimed["OS Disk Space Purged & Reclaimed"]
+        ISRRestored["ISR Pool Fully Synchronized"]
+        LagCleared["Ingest Consumer Pipeline Stabilized"]
+    end
+
+    Alert1 --> LogDirsCLI --> ConfigsCLI --> StorageReclaimed
+    Alert2 --> TopicsCLI --> ReassignCLI --> ISRRestored
+    Alert3 --> ConsumerCLI --> ResetOffsetCLI --> LagCleared
+
+    style Alert1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Alert2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Alert3 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style LogDirsCLI fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TopicsCLI fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ConsumerCLI fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ConfigsCLI fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ReassignCLI fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ResetOffsetCLI fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style StorageReclaimed fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style ISRRestored fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style LagCleared fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7,8 stroke:#34d399,stroke-width:2px;
+```
+
+---
+
+### 10.5 Incident Remediation Low-Level Design (LLD)
+
+```mermaid
+graph TB
+    subgraph StorageIncidentLLD ["Incident 1: Disk Exhaustion Remediation Flow"]
+        DiskFull["Host Disk Usage 100%"] --> InspectLogDirs["Execute kafka-logdirs.sh"]
+        InspectLogDirs --> TargetTopic["Identify Large Log Directories"]
+        TargetTopic --> AlterRetention["Execute kafka-configs.sh --add-config retention.ms=3600000"]
+        AlterRetention --> TriggerPurge["Broker LogCleaner Thread Scans Inactive Segments"]
+        TriggerPurge --> UnlinkFiles["Unlink Closed Segments -> Space Reclaimed"]
+    end
+
+    subgraph URPIncidentLLD ["Incident 2: Under-Replicated Partitions Remediation Flow"]
+        URPAlert["URP Count > 0 Detected"] --> FindPartition["Execute kafka-topics.sh --under-replicated-partitions"]
+        FindPartition --> CheckBroker["Identify Failed Broker / Unhealthy Disk"]
+        CheckBroker --> TriggerRebind["Execute kafka-reassign-partitions.sh"]
+        TriggerRebind --> ReplicaFetch["Replica Re-Syncs Data from Leader"]
+        ReplicaFetch --> ISRJoin["Re-join ISR Pool (URP = 0)"]
+    end
+
+    subgraph ConsumerLagLLD ["Incident 3: Emergency Consumer Lag Reset Flow"]
+        LagSpike["Unrecoverable Consumer Lag Spike"] --> InspectGroup["Execute kafka-consumer-groups.sh --describe"]
+        InspectGroup --> StopConsumer["Stop Consumer Service Container"]
+        StopConsumer --> ResetOffsets["Execute --reset-offsets --to-latest --execute"]
+        ResetOffsets --> CommitNewOffset["Write New Offset Pointer to __consumer_offsets"]
+        CommitNewOffset --> RestartConsumer["Start Consumer Service Container"]
+    end
+
+    style DiskFull fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style InspectLogDirs fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TargetTopic fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style AlterRetention fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TriggerPurge fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style UnlinkFiles fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+
+    style URPAlert fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style FindPartition fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style CheckBroker fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TriggerRebind fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ReplicaFetch fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ISRJoin fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+
+    style LagSpike fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style InspectGroup fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style StopConsumer fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style ResetOffsets fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style CommitNewOffset fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style RestartConsumer fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14 stroke:#34d399,stroke-width:2px;
+```
+
+---
+
 ## 11. Multi-Broker Scale-Out Architecture (Single-Node to 3-Node KRaft)
 
 ### 11.1 Multi-Broker Production Override Configuration & Connection Code
