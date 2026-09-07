@@ -2367,35 +2367,48 @@ graph TD
 ### 14.3 Timeout Cascade and Backoff Timing Low-Level Design (LLD)
 
 ```mermaid
-graph TB
-    subgraph TimeoutCascade ["Timeout Parameter Cascade"]
-        DeliveryTimeout["delivery.timeout.ms = 120000 (2 min)"]
-        DeliveryTimeout --> Constraint["Must be GE linger.ms + request.timeout.ms"]
+graph TD
+    subgraph ConfigHierarchy ["Timeout Parameter Hierarchy"]
+        DeliveryTimeout["delivery.timeout.ms = 120000 - 2 Minutes"]
+        Constraint["Constraint: delivery.timeout.ms GE linger.ms + request.timeout.ms"]
+        LingerMs["linger.ms = 10 - Batch Wait"]
+        RequestTimeout["request.timeout.ms = 30000 - Per Request"]
+        RetryBackoff["retry.backoff.ms = 100 - Retry Interval"]
 
-        LingerMs["linger.ms = 10 (Batch Wait)"]
-        RequestTimeout["request.timeout.ms = 30000 (Per-Request)"]
-        RetryBackoff["retry.backoff.ms = 100 (Between Retries)"]
-
-        LingerMs --> Timeline["Timeline: 10ms batch wait"]
-        RequestTimeout --> Timeline
-        RetryBackoff --> Timeline
-
-        Timeline --> Attempt1["Attempt 1: Send at T+10ms, Timeout at T+30010ms"]
-        Attempt1 -->|Fail| Wait1["Wait 100ms backoff"]
-        Wait1 --> Attempt2["Attempt 2: Send at T+30110ms, Timeout at T+60110ms"]
-        Attempt2 -->|Fail| Wait2["Wait 100ms backoff"]
-        Wait2 --> Attempt3["Attempt 3: Send at T+60210ms, Timeout at T+90210ms"]
-        Attempt3 -->|Fail| FinalCheck{"T+90210ms LT delivery.timeout.ms 120000?"}
-        FinalCheck -->|Yes| Attempt4["Attempt 4: Final retry"]
-        FinalCheck -->|No| PermanentFail["Permanent Failure Callback"]
+        DeliveryTimeout --> Constraint
+        LingerMs --> Constraint
+        RequestTimeout --> Constraint
+        RetryBackoff --> Constraint
     end
+
+    subgraph ExecutionTimeline ["Produce Retry Sequence Timeline"]
+        TimelineStart["Batch Initialized at T=0ms"]
+        Attempt1["Attempt 1: Send at T=10ms, Timeout at T=30010ms"]
+        Wait1["Wait 100ms Backoff"]
+        Attempt2["Attempt 2: Send at T=30110ms, Timeout at T=60110ms"]
+        Wait2["Wait 100ms Backoff"]
+        Attempt3["Attempt 3: Send at T=60210ms, Timeout at T=90210ms"]
+        FinalCheck{"Within 120s Delivery Deadline?"}
+        Attempt4["Attempt 4: Final Retry within Budget"]
+        PermanentFail["Permanent Failure Callback - Timeout"]
+    end
+
+    Constraint --> TimelineStart
+    TimelineStart --> Attempt1
+    Attempt1 -->|Fail| Wait1
+    Wait1 --> Attempt2
+    Attempt2 -->|Fail| Wait2
+    Wait2 --> Attempt3
+    Attempt3 -->|Fail| FinalCheck
+    FinalCheck -->|Yes| Attempt4
+    FinalCheck -->|No| PermanentFail
 
     style DeliveryTimeout fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
     style Constraint fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style LingerMs fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style RequestTimeout fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style RetryBackoff fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style Timeline fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TimelineStart fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style Attempt1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style Wait1 fill:#92400e,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
     style Attempt2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
