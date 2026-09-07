@@ -61,9 +61,29 @@ graph TB
 
 ---
 
-## 2. Broker Architecture & Component Deep-Dive
+## 2. Kafka Configuration Parameter Naming Conventions & Genesis
 
-### 2.1 Broker High-Level Design (HLD)
+Kafka configuration parameters follow three distinct naming conventions depending on where and how they are defined:
+
+```mermaid
+graph LR
+    P1["1. Broker Properties (server.properties)<br/>e.g. log.segment.bytes"] -->|Dot to Underscore + Uppercase + Prefix| P2["2. Environment Variables (docker-compose.yml)<br/>e.g. KAFKA_LOG_SEGMENT_BYTES"]
+    P3["3. JVM Launcher Flags<br/>e.g. -Xms512m -Xmx1024m"] -->|Passed directly to java entrypoint| P2
+```
+
+### Naming Conventions Breakdown
+
+| Convention Type | Target Environment | Formatting Pattern & Rules | Example Parameter |
+|---|---|---|---|
+| **1. Broker Properties** | `config/kafka/server.properties` | **Hierarchical Dot-Notation**: Grouped by functional subsystem (`log.*`, `offsets.topic.*`, `num.partitions`, `transaction.state.log.*`). | `log.segment.bytes` |
+| **2. Environment Variables** | `docker-compose.yml` | **Uppercase Underscore Mapping**: Standard Confluent/Docker convention. Prepend `KAFKA_`, convert to uppercase, and replace dots (`.`) with underscores (`_`). | `KAFKA_LOG_SEGMENT_BYTES` |
+| **3. JVM Launcher Options** | Container `entrypoint` / Compose `env` | **Standard Java Options**: `-Xms` (Initial Memory Size), `-Xmx` (Maximum Memory Size), and `-XX:` (Expert Garbage Collection / Metaspace options). | `KAFKA_HEAP_OPTS="-Xms512m -Xmx1024m"` |
+
+---
+
+## 3. Broker Architecture & Component Deep-Dive
+
+### 3.1 Broker High-Level Design (HLD)
 
 The broker manages network sockets, metadata coordination via KRaft consensus, memory allocation between Java Heap and Native OS Page Cache, and log segment disk storage.
 
@@ -83,7 +103,7 @@ graph TD
 
 ---
 
-### 2.2 Broker Low-Level Design (LLD)
+### 3.2 Broker Low-Level Design (LLD)
 
 The low-level broker execution details the socket acceptor, request queues, thread pools, memory boundaries, and physical file layout on disk.
 
@@ -114,7 +134,7 @@ graph TB
 
 ---
 
-### 2.3 Broker Detailed Configuration Breakdown
+### 3.3 Broker Detailed Configuration Breakdown
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
@@ -142,9 +162,9 @@ graph TB
 
 ---
 
-## 3. Producer Architecture & Component Deep-Dive
+## 4. Producer Architecture & Component Deep-Dive
 
-### 3.1 Producer High-Level Design (HLD)
+### 4.1 Producer High-Level Design (HLD)
 
 The producer accepts records from application threads, serializes keys/values, assigns target partitions via MurmurHash2 algorithm, buffers records in memory batches, and asynchronously transmits batches to the broker.
 
@@ -164,7 +184,7 @@ graph TD
 
 ---
 
-### 3.2 Producer Low-Level Design (LLD)
+### 4.2 Producer Low-Level Design (LLD)
 
 The low-level producer design reveals batching mechanics (`batch.size`, `linger.ms`), memory buffer pools (`buffer.memory`), inflight request tracking, retry logic, and acknowledgment handling.
 
@@ -202,7 +222,7 @@ graph TB
 
 ---
 
-### 3.3 Producer Detailed Configuration Breakdown
+### 4.3 Producer Detailed Configuration Breakdown
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
@@ -242,9 +262,9 @@ graph TB
 
 ---
 
-## 4. Consumer Architecture & Component Deep-Dive
+## 5. Consumer Architecture & Component Deep-Dive
 
-### 4.1 Consumer High-Level Design (HLD)
+### 5.1 Consumer High-Level Design (HLD)
 
 Consumers join Consumer Groups coordinated by a designated Broker Group Coordinator. Partitions are distributed among group members, and records are fetched in batches using long polling.
 
@@ -277,7 +297,7 @@ graph TD
 
 ---
 
-### 4.2 Consumer Low-Level Design (LLD)
+### 5.2 Consumer Low-Level Design (LLD)
 
 The low-level consumer design illustrates group join protocol (`JoinGroup`/`SyncGroup`), poll execution, batch fetch queues, manual vs automatic offset commits, and consumer rebalance mechanics.
 
@@ -307,7 +327,7 @@ graph TB
 
 ---
 
-### 4.3 Consumer Detailed Configuration Breakdown
+### 5.3 Consumer Detailed Configuration Breakdown
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
@@ -346,9 +366,9 @@ graph TB
 
 ---
 
-## 5. Topic & Partition Management Architecture
+## 6. Topic & Partition Management Architecture
 
-### 5.1 Topic & Partition High-Level Design (HLD)
+### 6.1 Topic & Partition High-Level Design (HLD)
 
 Topics are logical representations of event streams, physically divided into append-only log partitions distributed across brokers for horizontal scalability and high availability.
 
@@ -370,7 +390,7 @@ graph TD
 
 ---
 
-### 5.2 Topic & Partition Low-Level Design (LLD)
+### 6.2 Topic & Partition Low-Level Design (LLD)
 
 The low-level partition lifecycle shows log segment creation, active segment append operations, closed segment rolling, index file lookups, and log cleaner deletion execution.
 
@@ -403,7 +423,7 @@ graph TB
 
 ---
 
-### 5.3 Topic & Partition Detailed Configuration Breakdown
+### 6.3 Topic & Partition Detailed Configuration Breakdown
 
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
@@ -428,20 +448,171 @@ graph TB
 | **2. Why & When to Use It** | Kafka is an intermediate buffer. Telemetry data is consumed almost immediately by ClickHouse. Retaining 7 days duplicates data and consumes host storage. |
 | **3. Impact on Current System** | Reclaims ~35 GB of disk space on `/dev/sda2` by deleting 1-day-old segments. |
 
+---
+
+## 7. Exactly-Once Semantics (EOS), Idempotency & Transactions
+
+### 7.1 Idempotent Producer Mechanics (`enable.idempotence=true`)
+
+When a network timeout occurs while a producer transmits a batch to the broker, the producer retries. Without idempotency, the broker accepts duplicate records.
+
+```mermaid
+graph TD
+    subgraph Idempotent Producer Protocol
+        P1["Producer Client (enable.idempotence=true)"] -->|1. Allocate Producer ID (PID)| B1["Broker Sequence Tracker"]
+        P1 -->|2. Send Record Batch (PID: 101, Seq: 0)| B1
+        B1 -->|3. Persist Batch Seq 0| S1["Partition Log"]
+        B1 -.->|4. Network ACK Drops / Times Out| P1
+        P1 -->|5. Retry Batch (PID: 101, Seq: 0)| B1
+        B1 -->|6. Detect Duplicate Seq 0| D1["Discard Duplicate Payload & Re-ACK"]
+    end
+```
+
+### 7.2 EOS Configuration Breakdown
+
 | Dimension | Detailed Technical Specifications & Operational Guidance |
 |---|---|
-| **Parameter Key** | `log.roll.hours` |
-| **File Location & Target** | [`config/kafka/server.properties`](file:///home/btpl-lap-22/live/llm-obs-infra/config/kafka/server.properties) (Line 17) |
-| **Configured Value** | `2` (2 Hours) |
-| **Apache Kafka Default** | `168` (168 Hours / 7 Days) |
+| **Parameter Key** | `enable.idempotence` |
+| **File Location & Target** | Client Producer SDK Configuration |
+| **Configured Value** | `true` |
+| **Apache Kafka Default** | `true` (since Kafka 3.0) |
+| **Criticality Rating** | CRITICAL |
+| **1. What Is This Parameter?** | Ensures that the broker processes exactly one copy of a message batch sent by a producer, even if the producer retries due to network timeouts. |
+| **2. Why & When to Use It** | Eliminates duplicate records in telemetry and trace metrics pipelines caused by transient network retries. |
+| **3. Impact on Current System** | Eliminates duplicate span insertions into ClickHouse. |
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `isolation.level` |
+| **File Location & Target** | Client Consumer SDK Configuration |
+| **Configured Value** | `read_committed` *(Prod)* \| `read_uncommitted` *(Default)* |
+| **Apache Kafka Default** | `read_uncommitted` |
 | **Criticality Rating** | HIGH |
-| **1. What Is This Parameter?** | Maximum time window after which an active segment is forcibly closed, even if segment size is less than 100 MB. |
-| **2. Why & When to Use It** | Low-throughput topics take weeks to write 100 MB. Forced rolls every 2 hours guarantee active segments close and become eligible for 24-hour deletion. |
-| **3. Impact on Current System** | Eliminates storage leaks on dormant or low-volume topics. |
+| **1. What Is This Parameter?** | Controls whether consumers read uncommitted transactional messages (`read_uncommitted`) or only messages belonging to committed transactions (`read_committed`). |
+| **2. Why & When to Use It** | Prevents consumers from reading dirty records from aborted producer transactions. |
 
 ---
 
-## 6. Master Parameter Summary Matrix
+## 8. Log Compaction Mechanics & Cleanup Policies (`cleanup.policy`)
+
+### 8.1 Log Compaction Lifecycle
+
+Log compaction retains the latest value for each key within a partition log.
+
+```mermaid
+graph LR
+    subgraph Before Compaction
+        K1_V1["Key: K1, Val: V1 (Seq 1)"]
+        K2_V1["Key: K2, Val: V1 (Seq 2)"]
+        K1_V2["Key: K1, Val: V2 (Seq 3)"]
+        K2_V2["Key: K2, Val: V2 (Seq 4)"]
+    end
+
+    subgraph Log Compaction Cleaner
+        CleanerThread["Cleaner Thread"]
+    end
+
+    Before Compaction --> CleanerThread
+
+    subgraph After Compaction
+        K1_V2_Post["Key: K1, Val: V2 (Seq 3)"]
+        K2_V2_Post["Key: K2, Val: V2 (Seq 4)"]
+    end
+
+    CleanerThread --> After Compaction
+```
+
+### 8.2 Compaction Configuration Breakdown
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `cleanup.policy` |
+| **File Location & Target** | Topic Configuration / `server.properties` |
+| **Configured Value** | `delete` *(Telemetry Streams)* \| `compact` *(State Stores)* |
+| **Apache Kafka Default** | `delete` |
+| **Criticality Rating** | HIGH |
+| **1. What Is This Parameter?** | `delete` purges closed segments based on time/size. `compact` retains the latest record value per message key forever. `compact,delete` compacts by key and enforces time-based expiration. |
+| **2. Why & When to Use It** | Use `delete` for streaming telemetry spans and access logs. Use `compact` for user profiles, service registries, and stateful application lookup caches. |
+
+| Dimension | Detailed Technical Specifications & Operational Guidance |
+|---|---|
+| **Parameter Key** | `min.cleanable.dirty.ratio` |
+| **File Location & Target** | `config/kafka/server.properties` |
+| **Configured Value** | `0.5` (50% Dirty Ratio) |
+| **Apache Kafka Default** | `0.5` |
+| **Criticality Rating** | MEDIUM |
+| **1. What Is This Parameter?** | Controls the percentage of uncompacted ("dirty") records required in a log segment before the compaction cleaner thread executes. |
+
+---
+
+## 9. Native Kafka Emergency CLI Commands & Incident Runbooks
+
+### 9.1 Emergency Incident 1: Host Disk Storage 100% Full
+
+When `/var/lib/kafka/data` hits 100%, Kafka locks active log segments or shuts down.
+
+```bash
+# Step 1: Identify top storage-consuming topics
+docker exec -it llmobs-kafka-broker kafka-logdirs.sh \
+  --bootstrap-server localhost:9092 \
+  --describe
+
+# Step 2: Dynamically override retention to 1 hour for the bloated topic
+docker exec -it llmobs-kafka-broker kafka-configs.sh \
+  --bootstrap-server localhost:9092 \
+  --entity-type topics \
+  --entity-name llmobs-spans \
+  --alter \
+  --add-config retention.ms=3600000
+
+# Step 3: Verify retention cleaner purges closed log segments
+docker exec -it llmobs-kafka-broker kafka-topics.sh \
+  --bootstrap-server localhost:9092 \
+  --describe \
+  --topic llmobs-spans
+```
+
+---
+
+### 9.2 Emergency Incident 2: Under-Replicated Partitions (URP)
+
+```bash
+# Step 1: List all under-replicated partitions across the cluster
+docker exec -it llmobs-kafka-broker kafka-topics.sh \
+  --bootstrap-server localhost:9092 \
+  --describe \
+  --under-replicated-partitions
+
+# Step 2: Check broker disk directories for I/O errors or full drives
+docker exec -it llmobs-kafka-broker kafka-logdirs.sh \
+  --bootstrap-server localhost:9092 \
+  --describe
+```
+
+---
+
+### 9.3 Emergency Incident 3: Consumer Group Lag & Offset Reset
+
+```bash
+# Step 1: Inspect consumer group lag across all topics
+docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --describe \
+  --group llmobs-clickhouse-ingest
+
+# Step 2: Reset consumer group offsets to latest (skip broken buffer)
+docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --group llmobs-clickhouse-ingest \
+  --reset-offsets \
+  --to-latest \
+  --execute \
+  --topic llmobs-spans
+```
+
+---
+
+## 10. Master Parameter Summary Matrix
 
 | Config Parameter | Default Values | Values Example | What It Does | Why We Need To Set Up | Trade-off | Impact |
 |---|---|---|---|---|---|---|
@@ -458,17 +629,12 @@ graph TB
 | `batch.size` | `16384` (16 KB) | Base: `16384`<br/>Prod: `65536` (64 KB) | Maximum byte size per partition batch in producer memory buffer. | Controls memory batch size sent in a single produce request. | Larger batch size increases producer memory allocation per partition. | Optimizes disk sequential write blocks and network socket payloads. |
 | `enable.auto.commit` | `true` | Dev: `true`<br/>Prod: `false` | Controls whether consumer commits offsets automatically or via manual code. | Manual commit (`false`) prevents data loss if consumer crashes mid-processing. | Requires explicit `commitSync()` or `commitAsync()` code handling. | Guarantees at-least-once processing into ClickHouse without data gaps. |
 | `max.poll.interval.ms` | `300000` (5 Min) | Base: `300000`<br/>Prod: `600000` (10 Min) | Maximum time allowed between consumer `poll()` calls before eviction. | Prevents rebalance storms when ClickHouse batch inserts take extended time. | Setting too high delays failure detection when a consumer actually dies. | Eliminates consumer group rebalance storms during long database writes. |
-| `max.poll.records` | `500` | Base: `500`<br/>Prod: `100` | Maximum record batch returned by consumer in a single `poll()` call. | Controls processing workload per batch to fit inside `max.poll.interval.ms`. | Lower record count reduces consumer batch throughput. | Prevents consumer thread timeouts during heavy record transformations. |
-| `num.network.threads` | `3` | Base: `3`<br/>Prod: `8` | Sets number of network acceptor threads handling client TCP sockets. | Prevents TCP connection queue bottlenecks when thousands of agents connect. | Excess threads generate CPU context-switching overhead. | Handles socket connection loops efficiently across host CPU cores. |
-| `num.io.threads` | `8` | Base: `4`<br/>Prod: `8` | Sets number of worker threads executing disk reads and log writes. | Aligns disk worker processing directly with physical CPU cores (4 cores). | Too many worker threads create disk channel and CPU lock contention. | Stabilizes disk write latency under 10ms on host storage. |
-| `compression.type` | `producer` | Base: `producer`<br/>Prod: `lz4` | Defines message compression codec (`none`, `gzip`, `snappy`, `lz4`, `zstd`). | Telemetry payloads (JSON/Protobuf) compress heavily, saving 70% storage and I/O. | Compression adds minor CPU encoding latency on producers/brokers. | Reduces disk space usage and network bandwidth by 60%-80%. |
-| `unclean.leader.election.enable` | `false` | Base: `false`<br/>Prod: `false` | Controls whether out-of-sync replicas can be elected leader during failover. | Prevents silent data corruption and log divergence during broker outages. | If all in-sync replicas fail, partition remains offline until ISR recovers. | Guarantees zero message loss during broker failovers in production. |
-| `offsets.topic.replication.factor` | `1` | Dev: `1`<br/>Prod: `2` | Defines number of duplicate copies for consumer offset partitions across brokers. | Multi-broker production requires replication for HA; single broker must use 1. | Replication > 1 increases network synchronization and storage footprint. | Prevents consumer offset loss upon single broker failure in production. |
-| `KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS` | `3000` (3 Seconds) | Base: `0`<br/>Prod: `0` | Delay window Group Coordinator waits for joining consumers before rebalancing. | Eliminates artificial 3-second startup delays when container stack boots up. | Simultaneous startup on dynamic clusters might trigger multiple rapid rebalances. | Allows telemetry streams to establish instantly upon container boot. |
+| `enable.idempotence` | `true` | Base: `true`<br/>Prod: `true` | Enables Producer ID and sequence tracking to eliminate duplicate record writes. | Prevents duplicate record writes caused by producer network retries. | Negligible CPU overhead for sequence number validation. | Guarantees exact-once message writing to topic partition logs. |
+| `cleanup.policy` | `delete` | Base: `delete`<br/>Prod: `delete` *(or `compact` for state)* | Defines topic log cleanup strategy (`delete`, `compact`, `compact,delete`). | Controls whether log segments are deleted by time or compacted by record key. | Compaction requires background CPU and memory for dirty segment cleaner threads. | Prevents unbounded growth on key-value state store topics. |
 
 ---
 
-## 7. Multi-Broker Scale-Out Architecture (Single-Node to 3-Node KRaft)
+## 11. Multi-Broker Scale-Out Architecture (Single-Node to 3-Node KRaft)
 
 ```mermaid
 graph TB
