@@ -58,6 +58,7 @@ graph TD
 
     Conf --> Conf1["Kafka Configuration Guide"]:::conf
     Conf --> Conf2["ClickHouse Configuration Guide"]:::conf
+    Conf --> Conf3["OTel Collector Configuration Guide"]:::conf
 ```
 
 ---
@@ -72,7 +73,10 @@ graph TD
 | [cloud-infra-architecture-review.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/architectureDoc/cloud-infra-architecture-review.md) | Well-Architected Framework review covering Security, Reliability, & Cost pillars. | Cloud Engineering Leadership |
 | [technical-design-document.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/architectureDoc/technical-design-document.md) | Deep technical design for multi-container orchestration & readiness polling. | Senior Systems Developers |
 | [architecture-decision-record.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/architectureDoc/architecture-decision-record.md) | Consolidated ADR log & architectural decision selection rules. | Technical Steering Committee |
-| [infrastructure-resilience-and-edge-case-hardening.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/architectureDoc/infrastructure-resilience-and-edge-case-hardening.md) | ADR 0006 — Production-grade infrastructure resilience & dynamic discovery. | DevOps & Systems Engineers |
+| [infrastructure-resilience-and-edge-case-hardening.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/infrastructure-resilience-and-edge-case-hardening.md) | ADR 0006 — Production-grade infrastructure resilience & dynamic discovery. | DevOps & Systems Engineers |
+| [adr-0011-infrastructure-resource-optimization.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0011-infrastructure-resource-optimization.md) | ADR 0011 — Stack-wide memory limits, cgroup ceilings & logging caps across 10 services. | Infrastructure & SRE Leads |
+| [adr-0012-clickhouse-configuration.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0012-clickhouse-configuration.md) | ADR 0012 — ClickHouse server & profile settings validated against 26.8.2.7 under 4096M. | Database Administrators & SREs |
+| [adr-0013-otel-collector-configuration.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0013-otel-collector-configuration.md) | ADR 0013 — OpenTelemetry Collector memory limiter & runtime bounds under 1024M. | SREs & Observability Architects |
 
 ---
 
@@ -80,10 +84,10 @@ graph TD
 
 | Document | Description | Target Audience |
 |---|---|---|
-| [application-performance-review.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/performanceDoc/application-performance-review.md) | Real-world APM performance metrics for ingestion pipelines and collector endpoints. | SREs & Performance Engineers |
-| [infrastructure-capacity-planning-report.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/performanceDoc/infrastructure-capacity-planning-report.md) | 12-month forward-looking resource exhaustion analysis (ClickHouse/AlloyDB disk & RAM). | Infrastructure & FinOps Leads |
-| [load-stress-test-report.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/performanceDoc/load-stress-test-report.md) | High-throughput synthetic load & burst stress testing results (50,000 req/sec). | Performance Engineering Team |
-| [performance-benchmark-report.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/performanceDoc/performance-benchmark-report.md) | Database write/query benchmark analysis for ClickHouse, Redis, and AlloyDB Omni. | Database Administrators & SREs |
+| [application-performance-review.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/performanceDoc/application-performance-review.md) | Real-world APM performance metrics for ingestion pipelines and collector endpoints. | SREs & Performance Engineers |
+| [infrastructure-capacity-planning-report.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/performanceDoc/infrastructure-capacity-planning-report.md) | 12-month forward-looking resource exhaustion analysis (ClickHouse/AlloyDB disk & RAM). | Infrastructure & FinOps Leads |
+| [load-stress-test-report.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/performanceDoc/load-stress-test-report.md) | High-throughput synthetic load & burst stress testing results (50,000 req/sec). | Performance Engineering Team |
+| [performance-benchmark-report.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/performanceDoc/performance-benchmark-report.md) | Database write/query benchmark analysis for ClickHouse, Redis, and AlloyDB Omni. | Database Administrators & SREs |
 
 ---
 
@@ -91,21 +95,21 @@ graph TD
 
 | Document | Description | Target Audience |
 |---|---|---|
-| [acceptable-use-policy.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/acceptable-use-policy.md) | Policy governing infrastructure access, key usage, and container operations. | Security Officers & All Personnel |
-| [incident-response-report.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/incident-response-report.md) | Incident post-mortem template and SEV-1 to SEV-4 classification breakdown. | Security Incident Responders |
-| [pre-deployment-security-checklist.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/pre-deployment-security-checklist.md) | Mandatory 25-point verification gate before production deployment launches. | DevOps Engineers & SecOps |
-| [response-playbook.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/response-playbook.md) | Actionable incident response playbooks for DDoS, container breakout, and key leaks. | On-Call Engineers & SecOps |
-| [security-and-engineering-raci-escalation-matrix.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/security-and-engineering-raci-escalation-matrix.md) | RACI matrix defining ownership and 24/7 on-call escalation procedures. | Engineering Management & SecOps |
-| [security-architecture-review.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/security-architecture-review.md) | Formal evaluation of container bridge isolation, TLS endpoints, and authorization. | Security Architects & CISO |
-| [security-assessment-report.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/security-assessment-report.md) | Penetration testing report covering Traefik ingress and API exposure vectors. | Security Engineers |
-| [security-program-metrics-and-kpi-dashboard.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/security-program-metrics-and-kpi-dashboard.md) | Executive Security Dashboard tracking vulnerability remediation SLAs and MTTR. | Executive Leadership & CISOs |
-| [threat-model-report.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/threat-model-report.md) | Comprehensive STRIDE threat model evaluating span tampering and API key abuse. | Security Leads & System Designers |
-| [vulnerability-assessment-report.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/vulnerability-assessment-report.md) | Container image vulnerability scan audit and dependency CVE tracking. | SecOps & Infrastructure Engineers |
-| [critical-security-remediation-mandate.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/critical-security-remediation-mandate.md) | ADR 0007 — Critical security remediation mandate & adversarial review. | Security Engineers & CISOs |
-| [audits/README.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/audits/README.md) | Master Audit & Remediation Registry cataloging all independent security & resilience audits. | Security Auditors, Architects & CISOs |
-| [audits/complete/independent-audit-adr-0006.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/audits/complete/independent-audit-adr-0006.md) | AUD-0006 — Architecture & resilience security audit report (17 findings, fully remediated). | Security Auditors, Architects & CISOps |
-| [audits/pending/independent-audit-infra-deployment-config.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/audits/pending/independent-audit-infra-deployment-config.md) | AUD-0007 — Critical implementation-level security audit of the deployed stack (39 findings). | Security Auditors, Architects & CISOs |
-| [audits/pending/remediation-plan-infra-deployment-config.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/audits/pending/remediation-plan-infra-deployment-config.md) | AUD-0007 phased technical remediation plan with per-finding patches and verification commands. | Infrastructure & Security Engineers |
+| [acceptable-use-policy.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/acceptable-use-policy.md) | Policy governing infrastructure access, key usage, and container operations. | Security Officers & All Personnel |
+| [incident-response-report.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/incident-response-report.md) | Incident post-mortem template and SEV-1 to SEV-4 classification breakdown. | Security Incident Responders |
+| [pre-deployment-security-checklist.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/pre-deployment-security-checklist.md) | Mandatory 25-point verification gate before production deployment launches. | DevOps Engineers & SecOps |
+| [response-playbook.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/response-playbook.md) | Actionable incident response playbooks for DDoS, container breakout, and key leaks. | On-Call Engineers & SecOps |
+| [security-and-engineering-raci-escalation-matrix.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/security-and-engineering-raci-escalation-matrix.md) | RACI matrix defining ownership and 24/7 on-call escalation procedures. | Engineering Management & SecOps |
+| [security-architecture-review.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/security-architecture-review.md) | Formal evaluation of container bridge isolation, TLS endpoints, and authorization. | Security Architects & CISO |
+| [security-assessment-report.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/security-assessment-report.md) | Penetration testing report covering Traefik ingress and API exposure vectors. | Security Engineers |
+| [security-program-metrics-and-kpi-dashboard.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/security-program-metrics-and-kpi-dashboard.md) | Executive Security Dashboard tracking vulnerability remediation SLAs and MTTR. | Executive Leadership & CISOs |
+| [threat-model-report.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/threat-model-report.md) | Comprehensive STRIDE threat model evaluating span tampering and API key abuse. | Security Leads & System Designers |
+| [vulnerability-assessment-report.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/vulnerability-assessment-report.md) | Container image vulnerability scan audit and dependency CVE tracking. | SecOps & Infrastructure Engineers |
+| [critical-security-remediation-mandate.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/critical-security-remediation-mandate.md) | ADR 0007 — Critical security remediation mandate & adversarial review. | Security Engineers & CISOs |
+| [audits/README.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/audits/README.md) | Master Audit & Remediation Registry cataloging all independent security & resilience audits. | Security Auditors, Architects & CISOs |
+| [audits/complete/independent-audit-adr-0006.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/audits/complete/independent-audit-adr-0006.md) | AUD-0006 — Architecture & resilience security audit report (17 findings, fully remediated). | Security Auditors, Architects & CISOps |
+| [audits/pending/independent-audit-infra-deployment-config.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/audits/pending/independent-audit-infra-deployment-config.md) | AUD-0007 — Critical implementation-level security audit of the deployed stack (39 findings). | Security Auditors, Architects & CISOs |
+| [audits/pending/remediation-plan-infra-deployment-config.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/audits/pending/remediation-plan-infra-deployment-config.md) | AUD-0007 phased technical remediation plan with per-finding patches and verification commands. | Infrastructure & Security Engineers |
 
 ---
 
@@ -117,8 +121,9 @@ set, its trade-off, and its measured impact.
 
 | Document | Description | Target Audience |
 |---|---|---|
-| [kafka-configuration-guide.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/configDoc/kafka-configuration-guide.md) | Broker, producer, consumer & topic architecture with JVM heap, retention, and segment tuning rationale. | Backend, DevOps & Platform Engineers |
-| [clickhouse-configuration-guide.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/configDoc/clickhouse-configuration-guide.md) | Memory & cache ceilings, query admission control, per-query governance, and system-log retention — validated on ClickHouse 26.8.2.7 under the 4096M cgroup. | Database Administrators, SREs & DevOps |
+| [kafka-configuration-guide.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/configDoc/kafka-configuration-guide.md) | Broker, producer, consumer & topic architecture with JVM heap, retention, and segment tuning rationale. | Backend, DevOps & Platform Engineers |
+| [clickhouse-configuration-guide.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/configDoc/clickhouse-configuration-guide.md) | Memory & cache ceilings, query admission control, per-query governance, and system-log retention — validated on ClickHouse 26.8.2.7 under the 4096M cgroup. | Database Administrators, SREs & DevOps |
+| [otel-collector-configuration-guide.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/configDoc/otel-collector-configuration-guide.md) | OpenTelemetry Collector pipeline, memory limiter (800M/160M), GOMEMLIMIT, OTTL PII redaction, batching & Tempo gRPC routing under 1024M cgroup. | Observability Engineers, SREs & DevOps |
 
 ---
 

@@ -197,12 +197,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 1024M
         reservations:
           memory: 256M
     command: ["--config=/etc/otel-collector-config.yaml"]
     environment:
       - OTEL_SERVICE_NAME=llmobs-otel-collector
+      - GOMEMLIMIT=858993459
     volumes:
       - ./config/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
       - ./config/certs:/etc/otel-collector/certs:ro

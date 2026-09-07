@@ -28,8 +28,8 @@ processors:
 
   memory_limiter:
     check_interval: 1s
-    limit_mib: 512
-    spike_limit_mib: 128
+    limit_mib: 800
+    spike_limit_mib: 160
 
   transform/pii_redaction:
     error_mode: ignore

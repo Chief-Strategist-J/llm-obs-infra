@@ -102,7 +102,7 @@ The official ClickHouse documentation explicitly warns:
 
 ### Decision 3: Reduce OTel Collector Container Limit (1536M → 1024M) and Fix `limit_mib`
 
-**Status:** Accepted
+**Status:** Accepted (Implemented — see [ADR-0013](adr-0013-otel-collector-configuration.md))
 
 **Context:**
 The `memory_limiter` processor is set to `limit_mib: 512` inside a `1536M` container. Per official OpenTelemetry documentation, `limit_mib` must be set to **80–90% of the total memory allocated to the Collector process/container**. The Collector process consumes ~50 MiB above `limit_mib` due to Go runtime non-heap allocations.
@@ -333,7 +333,7 @@ A 4 GB Docker container is already an aggressive constraint for ClickHouse on a 
 |---|---|---|---|
 | 1 | Fix `KAFKA_JVM_PERFORMANCE_OPTS` → `KAFKA_HEAP_OPTS` | `docker-compose.yml` | ⬜ Pending |
 | 2 | Add ClickHouse `mark_cache_size=512MiB` | `config/clickhouse/config.d/custom.xml` | ✅ Superseded by ADR-0012 |
-| 3 | Fix OTel Collector container limit + `limit_mib` ratio | `docker-compose.yml`, `config/otel-collector/otel-collector-config.yaml` | ⬜ Pending |
+| 3 | Fix OTel Collector container limit + `limit_mib` ratio | `docker-compose.yml`, `config/otel-collector/otel-collector-config.yaml` | ✅ Implemented (see [ADR-0013](adr-0013-otel-collector-configuration.md)) |
 | 4 | Add Docker limits to Temporal, Tempo, Grafana, Traefik, Registry | `docker-compose.yml` | ⬜ Pending |
 | 5 | Add Redis Docker container limit (512M) | `docker-compose.yml` | ⬜ Pending |
 | 6 | Explicit Redis AOF settings + `maxmemory-clients` | `config/redis/redis.conf` | ⬜ Pending |
