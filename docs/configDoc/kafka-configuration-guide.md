@@ -375,7 +375,7 @@ graph TD
     end
 
     subgraph KafkaClusterBoundary ["Kafka Broker Cluster Boundary"]
-        subgraph BrokerCore ["llmobs-kafka Broker Process (cgroup 2048M Limit)"]
+        subgraph BrokerCore ["llmobs-kafka Broker Process - cgroup 2048M Limit"]
             NetListener["Network Socket Listener (Port 9092)"]
             JVMHeap["JVM Heap (-Xmx1024M)"]
             PageCache["Linux OS Page Cache"]
@@ -583,7 +583,7 @@ graph TB
         PageCache["Linux OS Page Cache - In-Memory Logs"]
     end
 
-    subgraph StorageLayout ["Physical Storage Layout (/var/lib/kafka/data)"]
+    subgraph StorageLayout ["Physical Storage Layout - /var/lib/kafka/data"]
         LogFile["00000000000000000000.log (Message Data)"]
         IndexFile["00000000000000000000.index (Offset Index)"]
         TimeIndex["00000000000000000000.timeindex (Timestamp Index)"]
@@ -739,7 +739,7 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph ProducerMemoryPool ["Producer Memory Pool (buffer.memory = 32MB)"]
+    subgraph ProducerMemoryPool ["Producer Memory Pool - buffer.memory = 32MB"]
         BatchP0["Partition 0 Batch (batch.size = 16KB)"]
         BatchP1["Partition 1 Batch (batch.size = 16KB)"]
         BatchP2["Partition 2 Batch (batch.size = 16KB)"]
@@ -760,7 +760,7 @@ graph TB
     Trigger1 --> SenderThread["Sender Thread"]
     Trigger2 --> SenderThread
 
-    subgraph InFlightNetworkQueue ["In-Flight Queue (max.in.flight.requests = 5)"]
+    subgraph InFlightNetworkQueue ["In-Flight Queue - max.in.flight.requests = 5"]
         Req1["In-Flight Produce Request 1"]
         Req2["In-Flight Produce Request 2"]
     end
@@ -880,7 +880,7 @@ finally:
 
 ```mermaid
 graph TD
-    subgraph ConsumerGroup ["Consumer Group (llmobs-clickhouse-ingest)"]
+    subgraph ConsumerGroup ["Consumer Group - llmobs-clickhouse-ingest"]
         C1["Consumer Thread 1"]
         C2["Consumer Thread 2"]
         C3["Consumer Thread 3"]
@@ -891,7 +891,7 @@ graph TD
         OffsetTopic["__consumer_offsets Topic"]
     end
 
-    subgraph KafkaTopicPartitions ["Telemetry Topic (3 Partitions)"]
+    subgraph KafkaTopicPartitions ["Telemetry Topic - 3 Partitions"]
         P0["Partition 0"]
         P1["Partition 1"]
         P2["Partition 2"]
@@ -1294,7 +1294,7 @@ admin.create_topics([topic_spec])
 
 ```mermaid
 graph TD
-    subgraph LogicalTopic ["Logical Telemetry Topic (llmobs-spans)"]
+    subgraph LogicalTopic ["Logical Telemetry Topic - llmobs-spans"]
 
         P0["Partition 0 (Broker 1 Leader)"]
         P1["Partition 1 (Broker 2 Leader)"]
@@ -1323,7 +1323,7 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph PartitionDirectoryEngine ["Partition Engine (/var/lib/kafka/data/llmobs-spans-0/)"]
+    subgraph PartitionDirectoryEngine ["Partition Engine - /var/lib/kafka/data/llmobs-spans-0/"]
         WriteOp["Produce Record Appended"] --> ActiveSegment["Active Segment: 00000000000000000200.log (Currently Appending Write)"]
 
         ActiveSegment --> RollCondition{"Segment Full 100MB or Time Expired 2h?"}
