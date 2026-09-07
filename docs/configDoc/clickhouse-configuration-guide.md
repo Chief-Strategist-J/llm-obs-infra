@@ -4,6 +4,24 @@
 >
 > Decision record: [`docs/architectureDoc/adr-0012-clickhouse-configuration.md`](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0012-clickhouse-configuration.md)
 
+## 0. How to Read the Diagrams
+
+Every diagram in this guide uses one consistent colour language, so a path can be followed by colour alone. Diagrams avoid `<br/>` line breaks, undirected `---` links and `|` characters inside labels, all three of which break GitHub's Mermaid renderer.
+
+| Colour | Meaning | Used for |
+|---|---|---|
+| 🟦 **Slate / blue** | Input or client | Incoming requests, env vars, compose definitions, shipped defaults |
+| 🟪 **Indigo** | Processing | Query pipeline stages, engine internals, merge work |
+| 🟣 **Purple** | Storage | MergeTree parts, caches, volumes, system log tables, spill files |
+| 🟥 **Magenta** | Decision gate | A threshold or branch: admission, spill, TTL conflict checks |
+| 🟩 **Green** | Safe / configured outcome | The path this configuration produces — bounded, recoverable |
+| 🟧 **Amber** | Caution | Works but needs care: headroom, generated files, unpublished listeners |
+| 🟥 **Red** | Failure | `Exit 137`, `MEMORY_LIMIT_EXCEEDED`, `BAD_ARGUMENTS`, rejected inserts |
+
+The recurring pattern is **red versus green**: red is what the shipped defaults produce on this host, green is what the configuration in this guide produces instead.
+
+---
+
 ## 1. Executive Master Parameter Reference Specifications
 
 To avoid scrolling back and forth between sections, this master reference provides an immediate, unified list of every ClickHouse parameter, its definitions, expected environment values, currently configured values, outcomes, trade-offs, and system impacts.
@@ -419,7 +437,6 @@ client = clickhouse_connect.get_client(
     database='llm_telemetry_analytics',
 )
 
-# Confirm the server-side ceilings this guide configures are actually in effect.
 rows = client.query("""
     SELECT name, value, default
     FROM system.server_settings
@@ -433,7 +450,6 @@ for name, value, default in rows:
     drift = 'DEFAULT' if value == default else f'overridden (default {default})'
     print(f"{name:32s} = {value:<14s} {drift}")
 
-# Live memory pressure against the 3.5 GiB tracker ceiling.
 used, ceiling = client.query("""
     SELECT
         (SELECT value FROM system.metrics WHERE metric = 'MemoryTracking'),
@@ -469,6 +485,21 @@ graph TD
 
     F1 -->|Aggregate Queries| G1["Grafana Portal"]
     C1 -->|Self-Telemetry| H1["system log tables - TTL 3 to 7 days"]
+
+    style A1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style A2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style A3 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style B1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style C1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style D1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style D3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style D4 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style F1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style F2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style H1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style G1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style E1 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style D2 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -514,6 +545,30 @@ graph TB
     end
 
     EX15 --> LOG1["Row written to system.query_log - TTL 7 days"]
+
+    style CL1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style CL2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style AD1 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style AD3 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style AD4 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style EX7 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style EX10 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style EX12 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style EX13 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style AD2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style EX1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style EX2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style EX3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style EX4 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style EX5 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style EX6 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style EX9 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style EX8 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style LOG1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style AD5 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style EX11 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style EX14 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style EX15 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 > **The critical ordering.** `max_memory_usage` fails *one* query. `max_server_memory_usage` fails the *newest* query. Only if both are absent or mis-sized does the Linux OOM killer terminate the container at `Exit 137` — which is unrecoverable and takes every in-flight query with it. Every memory parameter in this guide exists to keep failure on the left of that boundary.
@@ -546,14 +601,13 @@ client = clickhouse_connect.get_client(
 )
 
 GIB = 2 ** 30
-CGROUP_LIMIT = 4096 * 2 ** 20   # docker-compose.yml deploy.resources.limits.memory
+CGROUP_LIMIT = 4096 * 2 ** 20
 
 ceiling = int(client.command(
     "SELECT value FROM system.server_settings WHERE name = 'max_server_memory_usage'"))
 marks = int(client.command(
     "SELECT value FROM system.server_settings WHERE name = 'mark_cache_size'"))
 
-# The invariant this whole section exists to protect.
 assert ceiling < CGROUP_LIMIT, "tracker ceiling must sit BELOW the cgroup"
 assert marks < ceiling, "mark cache ceiling must sit BELOW the tracker ceiling"
 
@@ -563,7 +617,6 @@ print(f"tracker ceiling   : {ceiling / GIB:.2f} GiB ({ceiling / CGROUP_LIMIT:.1%
 print(f"untracked headroom: {headroom:.0f} MiB")
 print(f"mark cache        : {marks / GIB:.2f} GiB")
 
-# Live cache efficiency - a mark cache set too low shows up here first.
 hits, misses = client.query("""
     SELECT
         (SELECT value FROM system.events WHERE event = 'MarkCacheHits'),
@@ -584,15 +637,21 @@ ClickHouse defaults assume a **16 GB machine it owns exclusively**. Inside a 4 G
 graph TD
     H1["Host - 15 GB RAM / 4 Cores"] --> C1["cgroup Limit 4096M"]
     C1 --> T1["Memory Tracker Ceiling 3.5 GiB - 87.5%"]
-    C1 --> HD1["Untracked Headroom 512 MiB<br/>allocator fragmentation, thread stacks"]
+    C1 --> HD1["Untracked Headroom 512 MiB - allocator fragmentation, thread stacks"]
 
     T1 --> CA1["Mark Cache 512 MiB"]
     T1 --> CA2["Uncompressed Cache 0 - disabled"]
     T1 --> QM1["Query Memory - up to 16 x 2 GiB oversubscribed"]
     T1 --> BG1["Merges and Background Pools"]
 
-    style HD1 fill:#f9f2d9,stroke:#b8860b
-    style CA2 fill:#e8f5e9,stroke:#2e7d32
+    style H1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style C1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style T1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style QM1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style BG1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style HD1 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style CA1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style CA2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -608,26 +667,39 @@ graph TB
     end
 
     subgraph Problem ["Failure Path if Left at Default"]
-        D1 -->|Ceiling exceeds container| P1["Cache grows past the 4 GiB cgroup<br/>before its LRU ever evicts"]
-        D2 -->|Half the container| P2["2 GiB reachable if a client sets<br/>use_uncompressed_cache = 1"]
+        D1 -->|Ceiling exceeds container| P1["Cache grows past the 4 GiB cgroup - before its LRU ever evicts"]
+        D2 -->|Half the container| P2["2 GiB reachable if a client sets - use_uncompressed_cache = 1"]
         D3 -->|No tracker ceiling| P3["No catchable exception boundary"]
         P1 --> K1["Linux OOM Killer"]
         P2 --> K1
         P3 --> K1
-        K1 --> K2["Exit 137 - container terminated,<br/>all in-flight queries lost"]
+        K1 --> K2["Exit 137 - container terminated, - all in-flight queries lost"]
     end
 
     subgraph Configured ["Configured Path"]
         C1["mark_cache_size 536870912"] --> S1["LRU evicts inside the cgroup"]
         C2["uncompressed_cache_size 0"] --> S2["Unreachable from either direction"]
-        C3["max_server_memory_usage 3.5 GiB"] --> S3["MEMORY_LIMIT_EXCEEDED thrown<br/>to the requesting query"]
+        C3["max_server_memory_usage 3.5 GiB"] --> S3["MEMORY_LIMIT_EXCEEDED thrown - to the requesting query"]
         S1 --> S4["Container survives - one query fails"]
         S2 --> S4
         S3 --> S4
     end
 
-    style K2 fill:#ffebee,stroke:#c62828
-    style S4 fill:#e8f5e9,stroke:#2e7d32
+    style D1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style D2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style D3 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P1 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style P2 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style P3 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style K1 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style K2 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style C1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style C2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style C3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style S1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style S2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style S3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style S4 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -694,7 +766,6 @@ graph TB
 import concurrent.futures
 import clickhouse_connect
 
-
 def slow_query(n: int) -> str:
     """Occupy one of the 16 admission slots for ~2 seconds."""
     client = clickhouse_connect.get_client(
@@ -705,14 +776,10 @@ def slow_query(n: int) -> str:
         client.command("SELECT count() FROM numbers(400000000)")
         return f"query {n:02d}: admitted"
     except Exception as exc:
-        # Raised only after queue_max_wait_ms (3s) elapses with no free slot.
         if 'TOO_MANY_SIMULTANEOUS_QUERIES' in str(exc):
             return f"query {n:02d}: REJECTED after 3s in queue"
         raise
 
-
-# 24 requests against 16 slots: 16 admitted, 8 queue, and only those
-# still waiting after 3000ms are rejected.
 with concurrent.futures.ThreadPoolExecutor(max_workers=24) as pool:
     for outcome in pool.map(slow_query, range(24)):
         print(outcome)
@@ -736,7 +803,7 @@ Concurrency is the dominant memory-amplification risk on a 4-core host. A query 
 ```mermaid
 graph LR
     subgraph Unbounded ["Default - max_concurrent_queries 0"]
-        U1["100 admitted queries"] --> U2["x 4 threads = 400 threads<br/>contending for 4 cores"]
+        U1["100 admitted queries"] --> U2["x 4 threads = 400 threads - contending for 4 cores"]
         U2 --> U3["x 2 GiB = about 200 GiB demand"]
         U3 --> U4["Exit 137"]
     end
@@ -747,8 +814,14 @@ graph LR
         B3 --> B4["Query 17 waits 3s, then fails fast"]
     end
 
-    style U4 fill:#ffebee,stroke:#c62828
-    style B4 fill:#e8f5e9,stroke:#2e7d32
+    style U1 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style U2 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style U3 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style U4 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style B1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B4 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -778,7 +851,7 @@ sequenceDiagram
             Q-->>G: TOO_MANY_SIMULTANEOUS_QUERIES
         end
     end
-    Note over E: Cancelled at 300s by max_execution_time,<br/>releasing the slot
+    Note over E: Cancelled at 300s by max_execution_time, - releasing the slot
 ```
 
 > **`max_concurrent_queries` and `queue_max_wait_ms` are one mechanism, not two settings.** Shipping the concurrency cap without the wait queue turns every Grafana dashboard refresh burst into immediate errors. They must always change together.
@@ -856,17 +929,14 @@ client = clickhouse_connect.get_client(
     database='llm_telemetry_analytics',
 )
 
-# A high-cardinality GROUP BY is the query shape these limits exist for.
 AGGREGATE = """
     SELECT service_name, quantile(0.99)(duration_ms)
     FROM spans
     GROUP BY service_name
 """
 
-# 1. Default path: spills to disk past 1 GiB, completes slowly.
 client.query(AGGREGATE)
 
-# 2. Spilling disabled: the same query now fails at the 2 GiB per-query cap.
 try:
     client.query(AGGREGATE, settings={
         'max_bytes_before_external_group_by': 0,
@@ -876,7 +946,6 @@ except Exception as exc:
     assert 'MEMORY_LIMIT_EXCEEDED' in str(exc)
     print("without spill: MEMORY_LIMIT_EXCEEDED, as designed")
 
-# 3. Confirm the documented invariant: spill threshold is HALF the per-query cap.
 cap, spill = client.query("""
     SELECT
         (SELECT value FROM system.settings WHERE name = 'max_memory_usage'),
@@ -885,7 +954,6 @@ cap, spill = client.query("""
 assert int(spill) * 2 == int(cap), "spill threshold must be max_memory_usage / 2"
 print(f"cap {int(cap) / 2**30:.0f} GiB, spill at {int(spill) / 2**30:.0f} GiB - invariant holds")
 
-# 4. Per-session override for known-long analytical work.
 client.query("SELECT count() FROM spans", settings={'max_execution_time': 1800})
 ```
 
@@ -906,10 +974,13 @@ graph TD
     end
 
     P1 -->|Deliberate oversubscription| S1
-    S1 --> R1["Real queries never approach their cap.<br/>Budgeting 3.5 GiB / 16 = 224 MiB each<br/>would reject ordinary analytical work."]
-    S1 --> R2["When the sum DOES approach 3.5 GiB<br/>the newest query fails, not the server."]
+    S1 --> R1["Real queries never approach their cap. Budgeting 3.5 GiB / 16 = 224 MiB each - would reject ordinary analytical work."]
+    S1 --> R2["When the sum DOES approach 3.5 GiB - the newest query fails, not the server."]
 
-    style R2 fill:#e8f5e9,stroke:#2e7d32
+    style S1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style P1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style R1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style R2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -929,8 +1000,15 @@ graph TB
     Q7 -->|No| Q8["Result returned"]
     Q7 -->|Yes| Q9["MEMORY_LIMIT_EXCEEDED"]
 
-    style Q3 fill:#e8f5e9,stroke:#2e7d32
-    style Q9 fill:#ffebee,stroke:#c62828
+    style Q1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Q2 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style Q7 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style Q3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style Q8 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style Q4 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style Q5 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style Q6 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Q9 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
 ```
 
 > **Why the spill threshold is exactly half of `max_memory_usage`:** the merge phase of a spilled aggregation needs roughly as much memory again as the spill threshold itself. Half the per-query cap keeps that merge inside the cap. This is the ClickHouse-documented ratio, not an arbitrary choice.
@@ -1009,19 +1087,15 @@ client = clickhouse_connect.get_client(
     password='llmobs_clickhouse_s3cret_2026',
 )
 
-# The committed user file is GENERATED by the entrypoint on every boot.
-# Hash it before and after a restart to prove hand-edits do not survive.
 digest = hashlib.md5(REPO_USER_FILE.read_bytes()).hexdigest()
 print(f"default-user.xml md5: {digest}")
 
-# What the server actually believes about the account.
 for row in client.query("""
     SELECT name, auth_type, host_ip, storage
     FROM system.users
 """).result_rows:
     print(f"user={row[0]} auth={row[1]} hosts={row[2]} storage={row[3]}")
 
-# access_management = 1 materialises as grants carrying grant_option.
 escalation = client.query("""
     SELECT access_type, grant_option
     FROM system.grants
@@ -1029,11 +1103,15 @@ escalation = client.query("""
     LIMIT 5
 """).result_rows
 print("privileges the password holder can re-grant:", escalation)
-
-# Two-phase startup: the entrypoint runs a temporary server first.
-#   docker logs llmobs-clickhouse-analytics | grep -c "Ready for connections"
-#   -> expect 2, not 1. Probing after the first event hits a dying process.
 ```
+
+The entrypoint runs a **temporary** server before the real one, so a correct start emits the readiness banner twice. Counting it is the reliable way to know the real server is up:
+
+```bash
+docker logs llmobs-clickhouse-analytics 2>&1 | grep -c "Ready for connections"
+```
+
+Expect `2`, not `1`. Probing after the first event reaches a process that is about to exit. See §6.3.
 
 ---
 
@@ -1058,6 +1136,21 @@ graph TD
     V1 --> X1["Server settings - sections 3, 4, 7, 8"]
     V2 --> X2["Profile and user settings - sections 5, 6"]
     V3 --> X3["MergeTree parts, system logs, access store, tmp spill"]
+
+    style CO fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style IM fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style RS fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style LG fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style UL fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style DP fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style PT fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style HC fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style V1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style V2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style V3 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style X1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style X2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style X3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -1069,9 +1162,9 @@ The official image does **not** simply exec the server. It runs a two-phase star
 ```mermaid
 graph TB
     S1["docker start"] --> S2["/entrypoint.sh"]
-    S2 --> S3["Resolve env CLICKHOUSE_USER, CLICKHOUSE_PASSWORD,<br/>CLICKHOUSE_DB, CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT"]
+    S2 --> S3["Resolve env CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, - CLICKHOUSE_DB, CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT"]
     S3 --> S4{"CLICKHOUSE_SKIP_USER_SETUP = 1?"}
-    S4 -->|No| S5["OVERWRITE users.d/default-user.xml<br/>entrypoint line 122 - needs a writable mount"]
+    S4 -->|No| S5["OVERWRITE users.d/default-user.xml - entrypoint line 122 - needs a writable mount"]
     S4 -->|Yes| S6
     S5 --> S6{"CLICKHOUSE_DB set or initdb.d non-empty?"}
     S6 -->|Yes| S7["Start TEMPORARY server"]
@@ -1083,24 +1176,38 @@ graph TB
     S11 --> S12["Second Ready for connections event"]
     S12 --> S13["Healthcheck /ping returns Ok."]
 
-    style S5 fill:#fff3e0,stroke:#f57c00
-    style S8 fill:#fff3e0,stroke:#f57c00
-    style S12 fill:#e8f5e9,stroke:#2e7d32
+    style S1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style S2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style S3 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style S4 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style S6 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style S5 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style S8 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style S7 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style S9 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style S10 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style S11 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style S12 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style S13 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 #### `default-user.xml` Is Generated, Not Authored
 
 ```mermaid
 graph TD
-    E1["compose env<br/>CLICKHOUSE_USER, CLICKHOUSE_PASSWORD,<br/>CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1"] --> E2["entrypoint line 52<br/>CLICKHOUSE_ACCESS_MANAGEMENT inherits it, default 0"]
-    E2 --> E3["entrypoint line 122<br/>heredoc OVERWRITES users.d/default-user.xml"]
-    E3 --> E4["config/clickhouse/users.d/default-user.xml<br/>committed to git, byte-identical to template output"]
+    E1["compose env - CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1"] --> E2["entrypoint line 52 - CLICKHOUSE_ACCESS_MANAGEMENT inherits it, default 0"]
+    E2 --> E3["entrypoint line 122 - heredoc OVERWRITES users.d/default-user.xml"]
+    E3 --> E4["config/clickhouse/users.d/default-user.xml - committed to git, byte-identical to template output"]
     E4 --> E5["Server reads the regenerated file"]
 
     H1["Hand-edit default-user.xml"] -.->|silently reverted on next boot| E3
 
-    style H1 fill:#ffebee,stroke:#c62828
-    style E4 fill:#fff3e0,stroke:#f57c00
+    style E1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style E2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style E3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style E5 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style E4 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style H1 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
 ```
 
 > **The file committed to this repository is byte-for-byte the entrypoint's generated output** for the current environment variables — confirmed by md5 comparison against the running container and against the heredoc in `/entrypoint.sh`. It is a **generated artifact**, not hand-written configuration.
@@ -1177,26 +1284,27 @@ graph TD
 import clickhouse_connect
 from clickhouse_driver import Client as NativeClient
 
-# HTTP (8123) - what Grafana and the healthcheck use.
 http_client = clickhouse_connect.get_client(
     host='localhost', port=31421, username='default',
     password='llmobs_clickhouse_s3cret_2026',
 )
 print("default_database resolves to:", http_client.command("SELECT currentDatabase()"))
 
-# Native TCP (9000) - faster wire format for bulk ingest.
 native_client = NativeClient(
     host='localhost', port=31422, user='default',
     password='llmobs_clickhouse_s3cret_2026',
     database='llm_telemetry_analytics',
 )
 print("native protocol rows:", native_client.execute("SELECT 1"))
-
-# Enumerate every listener the server actually opened. Verified: the image also
-# binds 9004 (MySQL wire), 9005 (PostgreSQL wire) and 9009 (interserver) -
-# none of which are published in docker-compose.yml.
-#   docker exec llmobs-clickhouse-analytics ss -ltn
 ```
+
+To enumerate every listener the server actually opened:
+
+```bash
+docker exec llmobs-clickhouse-analytics ss -ltn
+```
+
+**Verified:** beyond 8123 and 9000 the image also binds **9004** (MySQL wire), **9005** (PostgreSQL wire) and **9009** (interserver) — none of which are published in `docker-compose.yml`, so they are reachable only from within `llmobs-network`.
 
 ---
 
@@ -1224,7 +1332,16 @@ graph LR
     G1["Grafana"] -->|container network, not host ports| P1
     OC["OTel / ingest writers"] -->|container network| P2
 
-    style Internal fill:#f9f2d9,stroke:#b8860b
+    style H1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style H2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style G1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style OC fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style P2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style P3 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style P4 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style P5 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style S1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -1333,12 +1450,10 @@ for name, engine_full in rows:
     assert match, f"{name} has NO TTL - it will grow without bound"
     column, days = match.group(1), int(match.group(2))
     assert days == EXPECTED[name], f"{name}: expected {EXPECTED[name]}d, found {days}d"
-    # span log keys off finish_date; every other table off event_date
     expected_col = 'finish_date' if name == 'opentelemetry_span_log' else 'event_date'
     assert column == expected_col, f"{name}: TTL on {column}, expected {expected_col}"
     print(f"{name:26s} TTL {days}d on {column}")
 
-# On-disk cost of self-telemetry, largest first.
 for row in client.query("""
     SELECT table, formatReadableSize(sum(bytes_on_disk)) AS size, sum(rows) AS rows
     FROM system.parts
@@ -1377,13 +1492,24 @@ graph TD
     V1 -->|With configured TTL| X2["Bounded at a 3 to 7 day window"]
 
     CH --> F1["File log /var/log/clickhouse-server/"]
-    F1 -->|Default 1000M x 10| X3["~10 GB in the container writable layer<br/>NOT a volume - invisible to volume accounting"]
+    F1 -->|Default 1000M x 10| X3["~10 GB in the container writable layer - NOT a volume - invisible to volume accounting"]
     F1 -->|Configured 100M x 3| X4["300 MB bounded"]
 
-    style X1 fill:#ffebee,stroke:#c62828
-    style X3 fill:#ffebee,stroke:#c62828
-    style X2 fill:#e8f5e9,stroke:#2e7d32
-    style X4 fill:#e8f5e9,stroke:#2e7d32
+    style CH fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style L1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style T1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style T2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style T3 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style T4 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style T5 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style T6 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style T7 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style V1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style F1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style X1 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style X3 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style X2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style X4 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -1395,16 +1521,21 @@ graph TD
 ```mermaid
 graph TB
     A["config.d/custom.xml declares a sibling ttl element"] --> M["ClickHouse config merge"]
-    B["Shipped config.xml declares an engine element<br/>for opentelemetry_span_log only"] --> M
+    B["Shipped config.xml declares an engine element - for opentelemetry_span_log only"] --> M
     M --> C{"Node has BOTH engine and ttl?"}
-    C -->|Yes| D["Code 36 BAD_ARGUMENTS<br/>Server REFUSES to start"]
+    C -->|Yes| D["Code 36 BAD_ARGUMENTS - Server REFUSES to start"]
     C -->|No| E["Table created with TTL"]
 
-    D --> F["Fix - move retention INSIDE the engine spec:<br/>ttl finish_date + INTERVAL 7 DAY DELETE"]
+    D --> F["Fix: put ttl finish_date INSIDE the engine spec"]
     F --> E
 
-    style D fill:#ffebee,stroke:#c62828
-    style E fill:#e8f5e9,stroke:#2e7d32
+    style A fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style B fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style M fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style C fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style D fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style E fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style F fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
 ```
 
 > `opentelemetry_span_log` is the only table in the stack needing this treatment — and it is the one this platform cares about most. It has no `event_time`; it is ordered on `finish_date` / `finish_time_us`, which is exactly why the image gives it a custom engine.
@@ -1467,7 +1598,6 @@ client = clickhouse_connect.get_client(
     database='llm_telemetry_analytics',
 )
 
-# Part count per partition. This is the number that triggers TOO_MANY_PARTS.
 for row in client.query("""
     SELECT table, partition, count() AS parts,
            formatReadableSize(sum(bytes_on_disk)) AS size,
@@ -1480,8 +1610,6 @@ for row in client.query("""
 """).result_rows:
     print(row)
 
-# Compression effectiveness per column - drives how much the OS page cache
-# can hold, and therefore how hard the mark cache has to work.
 for row in client.query("""
     SELECT name,
            formatReadableSize(sum(data_compressed_bytes))   AS compressed,
@@ -1493,13 +1621,11 @@ for row in client.query("""
 """).result_rows:
     print(row)
 
-# Merge backlog. A starved background_pool_size shows up here as growing queue.
 print(client.query("""
     SELECT table, elapsed, progress, formatReadableSize(memory_usage) AS mem
     FROM system.merges
 """).result_rows)
 
-# Granularity: 8192 rows per granule by default; one mark per granule per column.
 print(client.query("""
     SELECT table, name AS setting, value
     FROM system.merge_tree_settings
@@ -1515,23 +1641,34 @@ print(client.query("""
 ```mermaid
 graph TD
     I1["INSERT batch"] --> P1["New immutable PART written to disk"]
-    P1 --> P2["Part directory: one file per column<br/>plus primary.idx and .mrk mark files"]
+    P1 --> P2["Part directory: one file per column - plus primary.idx and .mrk mark files"]
 
-    P2 --> G1["Rows grouped into GRANULES<br/>index_granularity = 8192 rows"]
-    G1 --> M1["One MARK per granule per column<br/>= byte offset into the compressed column file"]
+    P2 --> G1["Rows grouped into GRANULES - index_granularity = 8192 rows"]
+    G1 --> M1["One MARK per granule per column - = byte offset into the compressed column file"]
     M1 --> MC["Marks cached in mark_cache_size - 512 MiB"]
 
     MC --> Q1["Query reads primary index"]
     Q1 --> Q2["Identify candidate granules"]
-    Q2 --> Q3["Use marks to seek directly<br/>skipping non-matching granules"]
-    Q3 --> Q4["Decompress only the needed blocks<br/>via the OS page cache"]
+    Q2 --> Q3["Use marks to seek directly - skipping non-matching granules"]
+    Q3 --> Q4["Decompress only the needed blocks - via the OS page cache"]
 
     P1 --> BG["Background merge pool - background_pool_size 16"]
     BG --> MG["Small parts merged into larger sorted parts"]
-    MG --> TTL["TTL DELETE evaluated during merge<br/>- this is HOW retention is enforced"]
+    MG --> TTL["TTL DELETE evaluated during merge - this is HOW retention is enforced"]
 
-    style MC fill:#e3f2fd,stroke:#1565c0
-    style TTL fill:#e8f5e9,stroke:#2e7d32
+    style I1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style P2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style G1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style M1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style MC fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Q1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Q2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Q3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Q4 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style BG fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style MG fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style TTL fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 ```
 
 > **This is why `mark_cache_size` matters so much.** Marks are the index that makes granule skipping possible. A cache too small forces a disk read for the index itself on every scan; a cache whose *ceiling* exceeds the container kills the process. 512 MiB is the compromise.
@@ -1545,7 +1682,7 @@ graph TD
 ```mermaid
 graph TB
     A1["Many small INSERTs"] --> A2["Many small parts"]
-    A2 --> A3{"Active parts per partition<br/>over parts_to_delay_insert 150?"}
+    A2 --> A3{"Active parts per partition - over parts_to_delay_insert 150?"}
     A3 -->|Yes| A4["INSERTs artificially delayed"]
     A3 -->|No| A5["INSERT proceeds normally"]
     A4 --> A6{"Over parts_to_throw_insert 300?"}
@@ -1559,11 +1696,21 @@ graph TB
     B4 --> A3
 
     C1["Fix: batch INSERTs larger and less often"] -.-> A1
-    C2["Anti-fix: shrinking background_pool_size<br/>makes this strictly worse"] -.-> B1
+    C2["Anti-fix: shrinking background_pool_size - makes this strictly worse"] -.-> B1
 
-    style A7 fill:#ffebee,stroke:#c62828
-    style C2 fill:#ffebee,stroke:#c62828
-    style B3 fill:#e8f5e9,stroke:#2e7d32
+    style A1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style A2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style A3 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style A6 fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style A4 fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style A5 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style C1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style B2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style B4 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style A7 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style C2 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -1804,8 +1951,6 @@ CGROUP_PROD = 8192 * 2 ** 20
 ceiling = int(client.command(
     "SELECT value FROM system.server_settings WHERE name = 'max_server_memory_usage'"))
 
-# KNOWN GAP: the prod override raises the cgroup but max_server_memory_usage is
-# hardcoded at 3.5 GiB in config.d, so ClickHouse still caps itself there.
 if ceiling < CGROUP_PROD * 0.8:
     unused = (CGROUP_PROD - ceiling) / 2 ** 30
     print(f"WARNING: {unused:.1f} GiB of the prod cgroup is unreachable - "
@@ -1821,26 +1966,33 @@ Scaling ClickHouse changes *which* parameters dominate: memory ceilings stop bei
 ```mermaid
 graph TB
     subgraph Current ["Current - Single Node"]
-        S1["llmobs-clickhouse-analytics<br/>cgroup 4096M | tracker 3.5 GiB<br/>16 query slots | MergeTree"]
+        S1["llmobs-clickhouse-analytics. cgroup 4096M, tracker 3.5 GiB, 16 query slots, MergeTree"]
     end
 
     subgraph Vertical ["Step 1 - Vertical, prod override exists today"]
-        V1["cgroup 8192M | tracker 7 GiB<br/>32 query slots | mark cache 1 GiB"]
-        V2["REQUIRES a prod config.d overlay<br/>which does not exist yet - see 11.3"]
+        V1["cgroup 8192M, tracker 7 GiB, 32 query slots, mark cache 1 GiB"]
+        V2["REQUIRES a prod config.d overlay that does not exist yet. See 11.3"]
         V1 -.-> V2
     end
 
     subgraph Horizontal ["Step 2 - Horizontal, ReplicatedMergeTree"]
-        H1["Shard 1 Replica A"] <-->|clickhouse-keeper| H2["Shard 1 Replica B"]
+        H1["Shard 1 Replica A"] -->|clickhouse-keeper| H2["Shard 1 Replica B"]
         H3["clickhouse-keeper quorum - 3 nodes"]
-        H1 --- H3
-        H2 --- H3
+        H1 --> H3
+        H2 --> H3
         H4["Distributed table engine fans queries across shards"]
     end
 
-    Current --> Vertical --> Horizontal
+    Current --> Vertical
+    Vertical --> Horizontal
 
-    style V2 fill:#ffebee,stroke:#c62828
+    style S1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style V1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style H1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style H2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style H3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style H4 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style V2 fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
 ```
 
 ---
