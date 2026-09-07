@@ -207,6 +207,86 @@ To avoid scrolling back and forth between sections, this master reference provid
     - **Scaling & Troubleshooting**: Enabling `log_min_duration_statement` is the cheapest observability win available and pairs naturally with this platform's purpose; enabling `ssl` requires certificate provisioning that Traefik currently handles at the edge.
 
 ---
+19. **Parameter**: `statement_timeout`
+    - **Definition**: Wall-clock ceiling on a single statement, after which it is cancelled.
+    - **Expected Values**: Dev: `120s` | Interactive API tier: `30s` | Migrations and manual VACUUM: `0` per session | PostgreSQL default: `0` (unlimited)
+    - **Currently Configured Value**: `120s` (`config/alloydb/postgresql.conf`)
+    - **Outcome / System Impact**: A runaway statement can no longer hold a connection slot and its locks indefinitely. This is what makes the connection-exhaustion runbook rare rather than routine.
+    - **Why & When to Configure It**: Deliberately generous. Temporal's auto-setup runs schema DDL over this same connection and index builds are legitimately slow. **It does not apply to autovacuum**, which runs as a background worker.
+    - **Scaling & Troubleshooting**: Raise per session (`SET statement_timeout = 0`) for migrations, `pg_repack` or manual `VACUUM` — never globally. Cancellations surface as `ERROR: canceling statement due to statement timeout`.
+
+---
+
+20. **Parameter**: `idle_in_transaction_session_timeout`
+    - **Definition**: Terminates a session that has an open transaction but has been idle for this long.
+    - **Expected Values**: Dev: `300s` | Strict: `60s` | PostgreSQL default: `0` (unlimited)
+    - **Currently Configured Value**: `300s` (`config/alloydb/postgresql.conf`)
+    - **Outcome / System Impact**: **The most valuable of the three guardrails.** An idle-in-transaction session pins its locks *and* holds back the vacuum horizon, so autovacuum cannot reclaim any row version newer than its snapshot — bloat grows for as long as it sits there.
+    - **Why & When to Configure It**: A crashed or paused client leaves exactly this state, and nothing else in the stack detects it.
+    - **Scaling & Troubleshooting**: Find offenders with `SELECT pid, state, xact_start FROM pg_stat_activity WHERE state = 'idle in transaction'`. This timeout largely removes the need for the manual backend-killing step in the connection runbook.
+
+---
+
+21. **Parameter**: `lock_timeout`
+    - **Definition**: How long a statement waits to acquire a lock before giving up.
+    - **Expected Values**: Dev: `30s` | Strict online DDL: `5s` | PostgreSQL default: `0` (unlimited)
+    - **Currently Configured Value**: `30s` (`config/alloydb/postgresql.conf`)
+    - **Outcome / System Impact**: Prevents a queue of blocked statements forming behind one slow `ALTER TABLE`, which is how a single DDL turns into a full outage.
+    - **Why & When to Configure It**: Long enough not to break Temporal's schema setup, short enough that a lock conflict fails fast instead of cascading.
+    - **Scaling & Troubleshooting**: Surfaces as `ERROR: canceling statement due to lock timeout`. Inspect the blocker with `SELECT pg_blocking_pids(pid), * FROM pg_stat_activity WHERE wait_event_type = 'Lock'`.
+
+---
+
+22. **Parameter**: `google_db_advisor.enabled`
+    - **Definition**: AlloyDB's index and query advisor.
+    - **Expected Values**: `on`
+    - **Currently Configured Value**: *Not overridden* — inherits `on`
+    - **Outcome / System Impact**: Collects workload statistics and surfaces index recommendations at negligible cost.
+    - **Why & When to Configure It**: Useful and cheap, so left enabled.
+    - **Scaling & Troubleshooting**: Recommendations are advisory and never applied automatically.
+
+---
+
+23. **Parameter**: `pg_stat_statements` (`.max`, `.track`, `.track_utility`)
+    - **Definition**: Extension aggregating execution statistics per normalised statement — calls, total and mean time, rows, and shared-buffer hit ratio.
+    - **Expected Values**: `.max` `5000` | `.track` `top` | `.track_utility` `off`
+    - **Currently Configured Value**: `5000`, `top`, `off` (`config/alloydb/postgresql.conf`), with the extension created by `config/alloydb/init-extensions.sql`
+    - **Outcome / System Impact**: **Verified:** preloaded and collecting, with the AlloyDB engine intact alongside it — `SHOW shared_preload_libraries` lists all six and `google_*` GUCs still number 73.
+    - **Why & When to Configure It**: `log_min_duration_statement` says *which* statement was slow and *when*; it cannot tell you which statement costs the most in aggregate. Ranking requires this extension, so the two are only useful together.
+    - **Scaling & Troubleshooting**: Top offenders: `SELECT queryid, calls, round(mean_exec_time::numeric,1) AS avg_ms, round(total_exec_time::numeric) AS total_ms, query FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20`. Reset a baseline with `SELECT pg_stat_statements_reset()`. Requires a **restart**, not a reload.
+
+---
+
+24. **Parameter**: `archive_mode`, `archive_command`, `archive_timeout`
+    - **Definition**: Continuous WAL archiving — the mechanism that turns `wal_level = replica` from a theoretical capability into actual point-in-time recovery.
+    - **Expected Values**: `on` | a command that copies each segment to durable storage | `3600` (RPO ceiling in seconds)
+    - **Currently Configured Value**: `on`, copy into the `alloydb_archive` volume, `3600` (`config/alloydb/postgresql.conf`)
+    - **Outcome / System Impact**: **Verified by an actual restore drill** (§9): a base backup plus archived WAL was recovered to a chosen timestamp, and a write made after that timestamp was correctly discarded.
+    - **Why & When to Configure It**: Before this, losing `alloydb_data` lost every workflow Temporal had ever recorded. `wal_level = replica` alone recovers nothing.
+    - **Scaling & Troubleshooting**: **If `archive_command` fails, PostgreSQL retries forever and WAL accumulates in `pg_wal` until the filesystem fills and the database stops.** Watch `SELECT * FROM pg_stat_archiver` — `failed_count` must stay at 0. The archive is **not self-pruning**; see the `pg_archivecleanup` step in §9.3. Budget roughly 16MB per hour of write activity, plus 16MB per forced switch.
+
+---
+
+25. **Parameter**: `autovacuum`, `autovacuum_max_workers`, `autovacuum_freeze_max_age`, `log_autovacuum_min_duration`
+    - **Definition**: The background process reclaiming dead row versions produced by MVCC, and the age at which a table is force-vacuumed to prevent transaction-ID wraparound.
+    - **Expected Values**: `on` / `3` / `200000000` / `10s`
+    - **Currently Configured Value**: those four (`config/alloydb/postgresql.conf`)
+    - **Outcome / System Impact**: Each worker may use up to `maintenance_work_mem`, so the realistic ceiling is 3 x 64MB. Declared explicitly so the wraparound horizon is visible rather than implied.
+    - **Why & When to Configure It**: Temporal's workflow tables are update-heavy, so every update leaves a dead tuple that is both bloat and wraparound pressure. Disabling or starving autovacuum eventually forces the database into a read-only protective shutdown.
+    - **Scaling & Troubleshooting**: Track the horizon with `SELECT datname, age(datfrozenxid) FROM pg_database ORDER BY 2 DESC` — investigate above ~150M, act well before the 200M force threshold and long before the 2-billion hard stop. `log_autovacuum_min_duration` makes slow vacuums visible, usually the first symptom.
+
+---
+
+26. **Parameter**: `deploy.resources.limits.cpus` & `reservations.cpus`
+    - **Definition**: CFS quota bounding the container's CPU share, and a soft scheduling floor.
+    - **Expected Values**: Dev: limit `2.0`, reservation `0.5` | Prod: limit `4.0`
+    - **Currently Configured Value**: limit `"2.0"`, reservation `"0.5"` (`docker-compose.yml`)
+    - **Outcome / System Impact**: **Verified** applied as `NanoCpus=2000000000`. Previously only memory was bounded, so a runaway query or an aggressive autovacuum could saturate all 4 host cores and starve the nine co-resident services.
+    - **Why & When to Configure It**: The guide repeatedly notes the host is shared; bounding memory alone leaves the other contended resource open. 2.0 of 4 cores lets PostgreSQL use parallelism while guaranteeing headroom.
+    - **Scaling & Troubleshooting**: Too low and `max_parallel_workers_per_gather` cannot be used effectively. Watch throttling with `docker stats` and, inside the container, `cat /sys/fs/cgroup/cpu.stat`. **Disk I/O is still unbounded** — see §10.2.
+
+---
+
 ## 2. System-Wide AlloyDB High-Level (HLD) & Low-Level (LLD) Design
 
 ### 2.1 System Integration Configuration & Python Code
@@ -486,45 +566,18 @@ graph TB
 
 ### 3.4 Memory Detailed Configuration Breakdown
 
-1. **Parameter**: `shared_buffers`
-   - **Definition**: Shared memory reserved at startup for caching data pages.
-   - **Expected Values**: Dev: `512MB` | Prod (8 GiB): `2GB`
-   - **Currently Configured Value**: `512MB` (`config/alloydb/postgresql.conf` line 44)
-   - **Outcome / System Impact**: Measured idle memory fell from **1.709 GiB (85.4%)** to **657 MiB (32%)** of the cgroup.
-   - **Why & When to Configure It**: AlloyDB auto-sized this to **12 GB from host RAM** inside a 2 GiB container.
-   - **Scaling & Troubleshooting**: Formula `cgroup x 0.25`. A multi-GB value on a 2 GiB container proves the config file is not being read.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `shared_buffers` | `512MB` | The page cache itself. Auto-sizing read host RAM and produced 12 GB inside a 2 GiB cgroup | §1.1 item 3 |
+| `effective_cache_size` | `1200MB` | The planner's view of total cache; the inherited 4 GB was host-derived | §1.1 item 4 |
+| `work_mem` | `8MB` | Per sort or hash operation - the multiplier against `max_connections` | §1.1 item 6 |
+| `maintenance_work_mem` | `64MB` | VACUUM and index builds; multiplies by `autovacuum_max_workers` | §1.1 item 7 |
+| `google_columnar_engine.memory_size_in_mb` | `256` | Columnar reservation, claimed only if the engine is enabled | §1.1 item 8 |
 
 ---
 
-2. **Parameter**: `effective_cache_size`
-   - **Definition**: Planner estimate of total cache available. Allocates nothing.
-   - **Expected Values**: Dev: `1200MB` | Prod: `5GB`
-   - **Currently Configured Value**: `1200MB` (`config/alloydb/postgresql.conf` line 55)
-   - **Outcome / System Impact**: Replaces an inherited 4 GB estimate that assumed host RAM.
-   - **Why & When to Configure It**: An over-large value makes the planner under-cost index scans that must hit disk.
-   - **Scaling & Troubleshooting**: Pure planner input; validate with `EXPLAIN (ANALYZE, BUFFERS)`.
-
----
-
-3. **Parameter**: `work_mem`
-   - **Definition**: Memory per sort or hash operation, per query.
-   - **Expected Values**: Dev: `8MB` | Prod: `16MB` | PostgreSQL default: `4MB`
-   - **Currently Configured Value**: `8MB` (`config/alloydb/postgresql.conf` line 48)
-   - **Outcome / System Impact**: Worst case `80 x 8MB` for single-operation queries; realistically far lower.
-   - **Why & When to Configure It**: `4MB` spills routine analytical sorts to disk unnecessarily.
-   - **Scaling & Troubleshooting**: Raise per session for heavy reports rather than globally; it multiplies by connections **and** by operations within a query.
-
----
-
-4. **Parameter**: `google_columnar_engine.memory_size_in_mb`
-   - **Definition**: Reservation for the AlloyDB columnar column store.
-   - **Expected Values**: Dev: `256` | Prod: `1024` | AlloyDB default: `1024`
-   - **Currently Configured Value**: `256` (`config/alloydb/postgresql.conf` line 62)
-   - **Outcome / System Impact**: Nothing allocated today because the engine is off; caps the exposure if it is ever enabled.
-   - **Why & When to Configure It**: The default reservation is half this container — the same class of defect as `shared_buffers`.
-   - **Scaling & Troubleshooting**: Enabling the columnar engine at 2 GiB is inadvisable; Google sizes AlloyDB AI features at 8 GB per vCPU.
-
----
 ## 4. Connection & Session Architecture
 
 ### 4.1 Connection Configuration & Python Pool Code
@@ -598,23 +651,15 @@ graph LR
 
 ### 4.3 Connection Detailed Configuration Breakdown
 
-1. **Parameter**: `max_connections`
-   - **Definition**: Total concurrent connection slots, inclusive of reserved ones.
-   - **Expected Values**: Dev: `80` | Prod: `200` | AlloyDB default: `100`
-   - **Currently Configured Value**: `80` (`config/alloydb/postgresql.conf` line 38)
-   - **Outcome / System Impact**: 50 slots for non-superuser roles after AlloyDB's 30-slot reservation.
-   - **Why & When to Configure It**: Must exceed Temporal's 30 pooled connections plus application pools with real headroom.
-   - **Scaling & Troubleshooting**: Cheap to raise (shared bookkeeping only); the expensive coupling is `work_mem`. `FATAL: sorry, too many clients already` means this is exhausted; `FATAL: remaining connection slots are reserved` means a non-superuser hit the reservation wall.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
 
----
-
-2. **Parameter**: `superuser_reserved_connections`
-   - **Definition**: Slots withheld from non-superuser roles.
-   - **Expected Values**: PostgreSQL default `3` | AlloyDB Omni default `30`
-   - **Currently Configured Value**: *Not overridden* — inherits `30`
-   - **Outcome / System Impact**: Consumes 30 of 80 slots. Measured idle usage is 11 backends total.
-   - **Why & When to Configure It**: Left at the vendor default deliberately; AlloyDB reserves for its own agents and lowering it blindly risks starving them.
-   - **Scaling & Troubleshooting**: If connection pressure appears while `pg_stat_activity` shows few backends, this reservation is the cause. Raise `max_connections` rather than cutting the reservation.
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `max_connections` | `80` | Total slots, inclusive of the reservation | §1.1 item 5 |
+| `superuser_reserved_connections` | `30` (inherited) | Withheld from non-superuser roles, leaving 50 usable | §1.1 item 14 |
+| `statement_timeout` | `120s` | Bounds a runaway statement that would otherwise hold a slot | §1.1 item 19 |
+| `idle_in_transaction_session_timeout` | `300s` | Releases sessions that pin locks and block vacuum | §1.1 item 20 |
+| `lock_timeout` | `30s` | Stops lock pile-ups forming behind slow DDL | §1.1 item 21 |
 
 ---
 
@@ -700,35 +745,17 @@ graph TD
 
 ### 5.3 Engine Detailed Configuration Breakdown
 
-1. **Parameter**: `shared_preload_libraries`
-   - **Definition**: Libraries loaded into the postmaster at startup; the AlloyDB engine itself.
-   - **Expected Values**: `g_stats,google_columnar_engine,google_job_scheduler,google_ml_integration,google_storage`
-   - **Currently Configured Value**: Inherited via the `include` (`config/alloydb/postgresql.conf` line 25)
-   - **Outcome / System Impact**: **Verified** present after the config change, with **73** `google_*` GUCs registered.
-   - **Why & When to Configure It**: Never set this directly here — it is generated into the data-directory config at initdb time and inherited. Setting it manually risks drifting from what the image expects.
-   - **Scaling & Troubleshooting**: `SHOW shared_preload_libraries` is the single fastest check that a config change did not silently downgrade AlloyDB to plain PostgreSQL. Requires a restart to change.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `shared_preload_libraries` | five AlloyDB libraries plus `pg_stat_statements` | The engine itself; the one setting that must be restated rather than inherited | §1.1 item 2 |
+| `google_columnar_engine.enabled` | `off` (inherited) | Column store, redundant here because ClickHouse owns analytical scans | §1.1 item 8 |
+| `google_db_advisor.enabled` | `on` (inherited) | Index and query recommendations, advisory only | §1.1 item 22 |
+| `pg_stat_statements.max` / `.track` | `5000` / `top` | Ranks the statements `log_min_duration_statement` flags | §1.1 item 23 |
 
 ---
 
-2. **Parameter**: `google_columnar_engine.enabled`
-   - **Definition**: Whether the columnar column store is active.
-   - **Expected Values**: 2 GiB container: `off` | Analytical deployments with 8 GB+: `on`
-   - **Currently Configured Value**: *Not overridden* — inherits `off`
-   - **Outcome / System Impact**: No column store is built, and the 256MB reservation is not claimed.
-   - **Why & When to Configure It**: Analytical scan acceleration lives in ClickHouse in this architecture, so the columnar engine is redundant here as well as unaffordable.
-   - **Scaling & Troubleshooting**: Enabling it on a 2 GiB container will claim the reservation immediately and compete directly with `shared_buffers`.
-
----
-
-3. **Parameter**: `google_db_advisor.enabled`
-   - **Definition**: AlloyDB's index and query advisor.
-   - **Expected Values**: `on`
-   - **Currently Configured Value**: *Not overridden* — inherits `on`
-   - **Outcome / System Impact**: Collects workload statistics and surfaces index recommendations at negligible cost.
-   - **Why & When to Configure It**: Useful and cheap; left enabled.
-   - **Scaling & Troubleshooting**: Its recommendations are advisory only and never applied automatically.
-
----
 ## 6. WAL, Checkpoints, Autovacuum & Physical Storage
 
 ### 6.1 Storage Configuration & Python Maintenance Code
@@ -827,55 +854,19 @@ graph TD
 
 ### 6.3 Storage Detailed Configuration Breakdown
 
-1. **Parameter**: `wal_level`
-   - **Definition**: How much information is written to the write-ahead log.
-   - **Expected Values**: `replica` (physical replication and PITR) | `logical` (CDC) | `minimal` (no replication)
-   - **Currently Configured Value**: `replica` (`config/alloydb/postgresql.conf` line 65)
-   - **Outcome / System Impact**: Keeps physical replication and point-in-time recovery possible without the extra WAL volume `logical` produces.
-   - **Why & When to Configure It**: Raise to `logical` only if change-data-capture into Kafka or ClickHouse is ever added; it materially increases WAL volume on a disk-constrained host.
-   - **Scaling & Troubleshooting**: Changing it requires a restart. `minimal` would break any future replica and is not worth the small saving.
+Full definitions, per-environment expected values and scaling guidance live once in [§1.1](#11-master-parameter-specifications--expected-values-list). This table states only what each parameter does *in this component*.
+
+| Parameter | Configured | Role in this component | Full specification |
+|---|---|---|---|
+| `wal_level` | `replica` | Enables both PITR and a future streaming standby | §1.1 item 12 |
+| `max_wal_size` / `min_wal_size` | `1GB` / `80MB` | Checkpoint trigger and WAL recycling floor | §1.1 item 12 |
+| `checkpoint_completion_target` | `0.9` | Spreads checkpoint I/O across a shared disk | §1.1 item 12 |
+| `archive_mode` / `archive_command` / `archive_timeout` | `on` / copy to volume / `3600` | Makes PITR real rather than merely possible | §1.1 item 24 |
+| `random_page_cost` / `effective_io_concurrency` | `1.1` / `200` | SSD planner costs; inherited values assumed spinning disk | §1.1 item 13 |
+| `autovacuum`, `autovacuum_max_workers`, `autovacuum_freeze_max_age` | `on`, `3`, `200000000` | Reclaims MVCC dead tuples and bounds wraparound | §1.1 item 25 |
 
 ---
 
-2. **Parameter**: `max_wal_size` & `min_wal_size`
-   - **Definition**: WAL accumulation that triggers a checkpoint, and the floor WAL is recycled down to.
-   - **Expected Values**: Dev: `1GB` / `80MB` | Write-heavy prod: `4GB` / `512MB`
-   - **Currently Configured Value**: `1GB` and `80MB` (`config/alloydb/postgresql.conf` lines 66-67)
-   - **Outcome / System Impact**: Bounds WAL growth on a host already at 72% disk usage.
-   - **Why & When to Configure It**: Too small forces frequent requested checkpoints, which produce write spikes and I/O contention with the nine other services.
-   - **Scaling & Troubleshooting**: If the log shows `checkpoints are occurring too frequently`, or `pg_stat_bgwriter.checkpoints_req` exceeds `checkpoints_timed`, raise `max_wal_size`. The cost is disk.
-
----
-
-3. **Parameter**: `checkpoint_completion_target`
-   - **Definition**: Fraction of the checkpoint interval over which dirty-page writes are spread.
-   - **Expected Values**: `0.9` (modern default and recommendation)
-   - **Currently Configured Value**: `0.9` (`config/alloydb/postgresql.conf` line 68)
-   - **Outcome / System Impact**: Smooths checkpoint I/O instead of issuing a burst, which matters on shared storage.
-   - **Why & When to Configure It**: Lower values concentrate writes and cause latency spikes visible to every other container on the same disk.
-   - **Scaling & Troubleshooting**: Leave at `0.9`. Values above `0.9` risk the next checkpoint starting before the previous finished.
-
----
-
-4. **Parameter**: `random_page_cost` & `effective_io_concurrency`
-   - **Definition**: Planner cost of a random page fetch relative to sequential, and the number of concurrent I/O requests the storage can service.
-   - **Expected Values**: SSD: `1.1` / `200` | Spinning disk: `4.0` / `2` | Inherited AlloyDB values: `4` / `128`
-   - **Currently Configured Value**: `1.1` and `200` (`config/alloydb/postgresql.conf` lines 72-73)
-   - **Outcome / System Impact**: The inherited `4` is a spinning-disk assumption and systematically discourages index scans on SSD.
-   - **Why & When to Configure It**: Both allocate nothing; they only change plan selection. This is the cheapest performance correction in the file.
-   - **Scaling & Troubleshooting**: Revert to `4` only if this ever runs on rotational storage. Validate with `EXPLAIN (ANALYZE, BUFFERS)` before and after.
-
----
-
-5. **Parameter**: `autovacuum`, `autovacuum_max_workers`, `autovacuum_naptime`
-   - **Definition**: The background process reclaiming dead tuples produced by PostgreSQL's MVCC updates and deletes.
-   - **Expected Values**: `on` / `3` / `60s` (defaults)
-   - **Currently Configured Value**: *Not overridden* — inherits `on`, `3`, `60s`
-   - **Outcome / System Impact**: Each worker may use up to `maintenance_work_mem` (64MB), so the realistic ceiling is 192MB.
-   - **Why & When to Configure It**: Left at defaults deliberately. Temporal's workflow tables are update-heavy and depend on healthy autovacuum; disabling or starving it causes unbounded table bloat.
-   - **Scaling & Troubleshooting**: Watch `pg_stat_user_tables.n_dead_tup`. Growing dead tuples with an old `last_autovacuum` means the workers cannot keep up — raise `autovacuum_max_workers` before touching anything else, and remember it multiplies `maintenance_work_mem`.
-
----
 ## 7. Native AlloyDB Emergency CLI Commands & Incident Runbooks
 
 ### 7.1 Standard Verification Block
@@ -1040,9 +1031,230 @@ Always use a **throwaway volume**. Reusing `alloydb_data` skips `initdb` and hid
 
 ---
 
-## 8. Scale-Out & Scope Boundaries
+## 9. Backup, Point-In-Time Recovery & Disaster Recovery
 
-### 8.1 Vertical Scaling Path
+Before the changes documented here, `wal_level = replica` made PITR *theoretically possible* and nothing implemented it. If `alloydb_data` had been lost, **nothing came back** — every workflow Temporal had ever recorded was in that volume alone.
+
+### 9.1 Recovery Objectives
+
+| Objective | Value | Determined by |
+|---|---|---|
+| **RPO** (worst-case data loss) | **1 hour** | `archive_timeout = 3600` forces a WAL switch even when a 16MB segment has not filled |
+| **RPO** (typical, under load) | minutes | A busy segment fills and archives long before the hour elapses |
+| **RTO** (measured in the drill) | **under 1 minute** for a ~100MB database | Base-backup restore plus WAL replay; scales with database size and WAL volume |
+| **Retention** | **unbounded — must be pruned** | The archive is not self-pruning. See §9.3 |
+| **Off-host durability** | **none** | Archive and data both live on the same host. See §9.4 |
+
+### 9.2 Backup & Recovery High-Level Design
+
+```mermaid
+graph TD
+    PG["Primary - llmobs-alloydb-db"] --> WAL["WAL segments in pg_wal"]
+    WAL --> ARCH["archive_command copies each segment"]
+    ARCH --> AV["alloydb_archive volume - 16MB per segment"]
+    PG --> BB["pg_basebackup streamed to the host"]
+    BB --> BF["base.tar - full physical snapshot"]
+
+    BF --> R1["Restore - untar into a fresh volume"]
+    AV --> R2["restore_command replays archived WAL"]
+    R1 --> REC["recovery.signal plus recovery_target_time"]
+    R2 --> REC
+    REC --> DONE["Recovered instance promoted at the chosen timestamp"]
+
+    WARN["If archive_command fails, WAL accumulates in pg_wal until the filesystem fills"]
+    ARCH -.-> WARN
+    GAP["Archive and data share one host - a host loss still loses both"]
+    AV -.-> GAP
+
+    style PG fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style WAL fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style ARCH fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style BB fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style R1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style R2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style REC fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style AV fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style BF fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style DONE fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style WARN fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style GAP fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+```
+
+### 9.3 Taking Backups
+
+```bash
+# Base backup, streamed to the host. Deliberately NOT written to a container
+# volume: a fresh named volume is root-owned and PostgreSQL (uid 999) cannot
+# write to it - the same trap archive_command hits.
+docker exec llmobs-alloydb-db pg_basebackup -U admin -D - -Ft -X fetch -P \
+  > backups/alloydb-base-$(date +%Y%m%dT%H%M%S).tar
+
+# Archive health. failed_count MUST be 0 - a non-zero value means WAL is
+# piling up in pg_wal and the filesystem will eventually fill.
+docker exec llmobs-alloydb-db psql -U admin -d llm_observability -xc \
+  "SELECT archived_count, failed_count, last_archived_wal, last_failed_wal, last_failed_time
+   FROM pg_stat_archiver"
+
+# Prune archived WAL older than the oldest base backup you intend to keep.
+# NOT automatic. Without this the archive grows without bound.
+docker exec llmobs-alloydb-db bash -c \
+  '/usr/lib/postgresql/15/bin/pg_archivecleanup /var/lib/postgresql/archive <OLDEST_WAL_TO_KEEP>'
+```
+
+`<OLDEST_WAL_TO_KEEP>` is the `backup_label` WAL name from the oldest base backup you still want to be able to restore from. Everything older is deleted.
+
+### 9.4 Verified Restore Drill
+
+This procedure was **executed, not drafted**. A row written after the recovery target was confirmed absent from the restored instance.
+
+```bash
+# 1. Unpack the base backup into a fresh volume, owned by uid 999.
+docker volume create adb_restore_data
+docker run --rm -i -v adb_restore_data:/restore --entrypoint bash google/alloydbomni:15 \
+  -c 'tar -x -C /restore && chown -R 999:999 /restore && chmod 700 /restore' < base.tar
+
+# 2. Point recovery at the archive and the target timestamp.
+docker run --rm -v adb_restore_data:/restore --entrypoint bash google/alloydbomni:15 -c "
+  printf \"restore_command = 'cp /var/lib/postgresql/archive/%%f %%p'\n\
+recovery_target_time = '2026-09-07 19:14:12+00'\n\
+recovery_target_action = 'promote'\n\" >> /restore/postgresql.auto.conf
+  touch /restore/recovery.signal
+  chown 999:999 /restore/postgresql.auto.conf /restore/recovery.signal"
+
+# 3. Start the restored instance with the archive mounted read-only.
+#    NOTE the config mount - see the warning below.
+docker run -d --name adb-restore --memory 2048m \
+  -v adb_restore_data:/var/lib/postgresql/data \
+  -v alloydb_archive:/var/lib/postgresql/archive:ro \
+  -v "$PWD/config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro" \
+  google/alloydbomni:15 postgres -c config_file=/etc/postgresql/postgresql.conf
+
+# 4. Confirm where recovery stopped.
+docker logs adb-restore 2>&1 | grep -E "starting point-in-time|recovery stopping|redo done"
+```
+
+Observed during the drill:
+
+```
+LOG:  starting point-in-time recovery to 2026-09-07 19:14:12.021766+00
+LOG:  consistent recovery state reached at 0/51CDCE8
+LOG:  recovery stopping before commit of transaction 949, time 2026-09-07 19:14:13.340696+00
+LOG:  redo done at 0/60002F8
+LOG:  database system is ready to accept connections
+```
+
+Rows written before the target survived; the row written after it did not.
+
+> **Restore gotcha found during the drill.** The first restore was started **without** the config mount and `-c config_file=`, so it fell back to the data-directory config captured inside the base backup. `shared_preload_libraries` came back **without `pg_stat_statements`**, and `shared_buffers` would have reverted to the host-derived 12 GB. **A restored instance must be started with the same mount and command as the primary**, or it silently loses every override in this guide. Step 3 above includes them.
+
+### 9.5 What Is Still Missing
+
+| Gap | Consequence | Status |
+|---|---|---|
+| **No scheduled base backup** | The commands in §9.3 are manual. Nothing runs them. | Needs a cron or scheduled job; the stack has no scheduler |
+| **No off-host copy** | `alloydb_archive` and `alloydb_data` live on the same disk. Losing the host loses both, and PITR with it. | Needs object storage or an off-host target |
+| **No automated archive pruning** | The archive grows until the disk fills, on a host already at 72%. | `pg_archivecleanup` must be scheduled |
+| **Drill is manual** | Recovery is verified as of this writing, not continuously. | Needs periodic re-drilling to stay trustworthy |
+
+**This is a real but incomplete capability.** Recovery is now possible and proven; it is not yet automated, off-host, or self-maintaining. Treat the RPO/RTO figures in §9.1 as achievable-on-demand, not as an operating guarantee.
+
+---
+
+## 10. Availability, Monitoring & Remaining Architecture Gaps
+
+### 10.1 Availability — Single Point of Failure
+
+**AlloyDB is currently a single point of failure for all Temporal workflow state.** There is no standby, no automatic failover, and no promotion procedure. Earlier text listing a streaming replica under future scaling described an aspiration, not a configuration.
+
+What exists today, and what a standby would need:
+
+| Element | Status |
+|---|---|
+| `wal_level = replica` | **Done** — no restart needed to add a standby |
+| WAL archive a standby could bootstrap from | **Done** — §9 |
+| A configured standby instance | **Missing** |
+| Replication role and `pg_hba` entry for it | **Missing** — `pg_hba.conf` grants replication only over loopback |
+| `max_wal_senders` / replication slot | **Missing** |
+| Promotion procedure and a documented failover trigger | **Missing** |
+| Application-side reconnect and read/write split | **Missing** |
+
+Until those exist, the honest availability posture is: **restore from backup, with the RTO in §9.1**. A host or volume failure means an outage of that length, not a failover.
+
+### 10.2 Monitoring — Nothing Is Wired
+
+Every metric this guide tells an operator to check — `pg_stat_archiver.failed_count`, `checkpoints_req` versus `checkpoints_timed`, `n_dead_tup`, `age(datfrozenxid)`, connection counts — is **only reachable by hand**. None reaches a dashboard or fires an alert.
+
+The blocker is architectural, not effort:
+
+```mermaid
+graph LR
+    PG["AlloyDB pg_stat_* views"] --> RCV["OTel Collector postgresql receiver - NOT configured"]
+    RCV --> PIPE["A metrics pipeline - DOES NOT EXIST"]
+    PIPE --> BK["A metrics backend - DOES NOT EXIST"]
+    BK --> GRAF["Grafana dashboards and alerts"]
+
+    NOTE["The collector currently defines a traces pipeline only. Traefik exposes Prometheus metrics that nothing scrapes."]
+    PIPE -.-> NOTE
+
+    style PG fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style GRAF fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style RCV fill:#78350f,stroke:#fbbf24,stroke-width:2px,color:#f8fafc
+    style PIPE fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style BK fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+    style NOTE fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#f8fafc
+```
+
+**Verified:** `config/otel-collector/otel-collector-config.yaml` declares a `traces` pipeline and nothing else — no metrics receiver, no metrics exporter, no metrics backend anywhere in the stack. `config/traefik/traefik.yml` enables a Prometheus endpoint that nothing scrapes.
+
+The AlloyDB half is small once a metrics pipeline exists:
+
+```yaml
+# config/otel-collector/otel-collector-config.yaml
+receivers:
+  postgresql:
+    endpoint: llmobs-alloydb:5432
+    username: ${env:ALLOYDB_USER}
+    password: ${env:ALLOYDB_PASSWORD}
+    databases: [llm_observability]
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:            # <-- this pipeline does not exist yet
+      receivers: [postgresql]
+      processors: [memory_limiter, batch]
+      exporters: [<a metrics backend>]
+```
+
+Choosing that backend is a stack-level decision — it affects Kafka and ClickHouse equally, both of which have the same blind spot — so it is named here rather than decided here.
+
+**Alerts worth defining once metrics exist:** `pg_stat_archiver.failed_count > 0` (WAL piling up, disk will fill), `age(datfrozenxid) > 150000000` (wraparound pressure), non-superuser connections above 40 of 50 usable, and dead tuples growing while `last_autovacuum` stays old.
+
+### 10.3 No Connection Pooler
+
+The 80-slot budget is fully committed: 30 reserved for superusers, 30 for Temporal, leaving roughly 20 for everything else. That is arithmetic with no margin, and each additional application replica multiplies its own pool against it.
+
+A transaction-mode PgBouncer in front of AlloyDB would decouple client connections from backend connections, letting hundreds of clients share ~20 server connections. It is deliberately **not** added here because it changes the connection topology for Temporal and needs verification first:
+
+- Transaction mode breaks session-scoped features — `SET` outside a transaction, advisory locks, `LISTEN`/`NOTIFY`, and prepared statements without `max_prepared_statements` tuning.
+- Temporal's `postgres12` driver behaviour under transaction pooling must be confirmed before it goes in front of workflow state.
+- It adds a component on the critical path of every query.
+
+Until then, the mitigation is the §1.1 item 19-21 guardrails: bounded statements, no indefinite idle-in-transaction sessions, and bounded lock waits.
+
+### 10.4 Disk I/O Is Still Unbounded
+
+CPU is now bounded (§1.1 item 26) and memory always was. **Block I/O is not.** On a host at 72% disk usage shared with nine services — including ClickHouse, which spills large sorts to the same disk — a checkpoint burst or an aggressive `VACUUM` can still starve neighbours.
+
+Compose supports `blkio_config` (weights and device read/write limits) in non-swarm mode. It is not set for any service in this stack, so applying it to AlloyDB alone would only shift contention. Like the metrics backend, this is a stack-level decision.
+
+---
+
+## 11. Scale-Out & Scope Boundaries
+
+### 11.1 Vertical Scaling Path
 
 ```mermaid
 graph TB
@@ -1068,7 +1280,7 @@ graph TB
 
 **`2048M` is Google's documented hard minimum for AlloyDB Omni, not a tuned value.** There is no headroom for the Columnar Engine or AlloyDB AI, which Google sizes at 8 GB per vCPU. Unlike ClickHouse, AlloyDB has **no `docker-compose.prod.yml` override at all** — production would inherit the 2 GiB development floor. That is a gap worth closing before any production use.
 
-### 8.2 Scope Boundaries
+### 11.2 Scope Boundaries
 
 | Item | Why Not Covered Here | Owner |
 |---|---|---|

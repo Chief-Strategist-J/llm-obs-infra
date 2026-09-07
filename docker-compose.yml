@@ -271,8 +271,10 @@ services:
       resources:
         limits:
           memory: 2048M
+          cpus: "2.0"
         reservations:
           memory: 512M
+          cpus: "0.5"
     ports:
       - "${PORT_ALLOYDB:-31420}:5432"
     environment:
@@ -284,6 +286,16 @@ services:
       - ALLOYDB_DB=${ALLOYDB_DB:-llm_observability}
       - OTEL_SERVICE_NAME=llmobs-alloydb-db
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://llmobs-otel-collector:4318
+    # A named volume mounted at a path the image does not contain is created
+    # root-owned, so PostgreSQL (uid 999) cannot write to it and
+    # archive_command fails forever - WAL then accumulates in pg_wal until the
+    # filesystem fills. The container starts as root, so ownership is fixed
+    # here before docker-entrypoint.sh drops privileges.
+    entrypoint:
+      - "/bin/bash"
+      - "-c"
+      - "install -d -o postgres -g postgres -m 0700 /var/lib/postgresql/archive && exec /usr/local/bin/docker-entrypoint.sh \"$$@\""
+      - "--"
     command:
       - "postgres"
       - "-c"
@@ -291,7 +303,9 @@ services:
     volumes:
       - ./config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./config/alloydb/security-audit.sql:/docker-entrypoint-initdb.d/10-security-audit.sql:ro
+      - ./config/alloydb/init-extensions.sql:/docker-entrypoint-initdb.d/20-init-extensions.sql:ro
       - alloydb_data:/var/lib/postgresql/data
+      - alloydb_archive:/var/lib/postgresql/archive
     networks:
       - llmobs-network
     healthcheck:
@@ -373,6 +387,7 @@ networks:
     external: true
 
 volumes:
+  alloydb_archive:
   tempo_data:
   grafana_data:
   alloydb_data:
