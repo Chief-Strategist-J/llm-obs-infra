@@ -414,11 +414,6 @@ graph TD
     style C1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style C2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style Coord fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1 stroke:#38bdf8,stroke-width:2px;
-    linkStyle 2,3,4 stroke:#34d399,stroke-width:2px;
-    linkStyle 5 stroke:#818cf8,stroke-width:2px;
-    linkStyle 6,7,8,9 stroke:#c084fc,stroke-width:2px;
 ```
 
 ---
@@ -471,10 +466,6 @@ graph TB
     style C_Buf fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style C_Poll fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style C_Commit fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3 stroke:#38bdf8,stroke-width:2px;
-    linkStyle 4,5,6,7,8,9,10 stroke:#34d399,stroke-width:2px;
-    linkStyle 11,12,13,14,15 stroke:#c084fc,stroke-width:2px;
 ```
 
 ---
@@ -545,10 +536,6 @@ graph TD
     style WorkPool fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style MemoryMgr fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style LogEngine fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0 stroke:#38bdf8,stroke-width:2px;
-    linkStyle 1 stroke:#818cf8,stroke-width:2px;
-    linkStyle 2,3,4,5,6 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -620,8 +607,6 @@ graph TB
     style IndexFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style TimeIndex fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style EpochFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -726,9 +711,6 @@ graph TD
     style SenderThread fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style SocketChannel fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style KafkaBroker fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4 stroke:#38bdf8,stroke-width:2px;
-    linkStyle 5 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -785,8 +767,6 @@ graph TB
     style AckHandler fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style Complete fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style RetryQueue fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14 stroke:#38bdf8,stroke-width:2px;
 ```
 
 ---
@@ -895,9 +875,9 @@ graph TD
         P2["Partition 2"]
     end
 
-    C1 -->|Fetch & Process| P0
-    C2 -->|Fetch & Process| P1
-    C3 -->|Fetch & Process| P2
+    C1 -->|Fetch and Process| P0
+    C2 -->|Fetch and Process| P1
+    C3 -->|Fetch and Process| P2
 
     C1 -->|Heartbeat and Offset Commit| Coord
     C2 -->|Heartbeat and Offset Commit| Coord
@@ -912,8 +892,6 @@ graph TD
     style P0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style P1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style P2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6 stroke:#c084fc,stroke-width:2px;
 ```
 
 ---
@@ -960,8 +938,6 @@ graph TB
     style CoordNode fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style OK fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style Dead fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13 stroke:#c084fc,stroke-width:2px;
 ```
 
 ---
@@ -1062,19 +1038,21 @@ graph TD
     style TargetPartition fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style StickyPartitioner fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style CurrentBatchPartition fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5 stroke:#38bdf8,stroke-width:2px;
 ```
 
 #### Partition Skew & Hashing Mechanics (LLD)
 
 ```mermaid
 graph TB
-    subgraph PartitionHotspotting ["Partition Hashing & Skew Mechanics"]
-        Key1["Key: trace_101"] --> H1["Hash: 41208571"] --> P0["Partition 0 (33% Load)"]
-        Key2["Key: trace_102"] --> H2["Hash: 89012444"] --> P1["Partition 1 (33% Load)"]
-        Key3["Key: trace_103"] --> H3["Hash: 12048912"] --> P2["Partition 2 (33% Load)"]
-        NullKey["Key: None"] --> Sticky["Sticky Batcher"] --> P0
+    subgraph PartitionHotspotting ["Partition Hashing and Skew Mechanics"]
+        Key1["Key: trace_101"] --> H1["Hash: 41208571"]
+        H1 --> P0["Partition 0 (33% Load)"]
+        Key2["Key: trace_102"] --> H2["Hash: 89012444"]
+        H2 --> P1["Partition 1 (33% Load)"]
+        Key3["Key: trace_103"] --> H3["Hash: 12048912"]
+        H3 --> P2["Partition 2 (33% Load)"]
+        NullKey["Key: None"] --> Sticky["Sticky Batcher"]
+        Sticky --> P0
     end
 
     style Key1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -1088,8 +1066,6 @@ graph TB
     style P0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style P1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style P2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7 stroke:#38bdf8,stroke-width:2px;
 ```
 
 ---
@@ -1138,16 +1114,13 @@ graph TB
     style Follower2LEO fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style LeaderHW fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
     style ConsumerVisible fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2 stroke:#34d399,stroke-width:2px;
-    linkStyle 3 stroke:#f0abfc,stroke-width:2px;
 ```
 
 #### Partition Log Offset & Pointer Layout (LLD)
 
 ```mermaid
 graph LR
-    subgraph LogSegmentPointers ["Partition Log Offset & Watermark Architecture"]
+    subgraph LogSegmentPointers ["Partition Log Offset and Watermark Architecture"]
         O0["Offset 0 (Committed)"] --> O1["Offset 1 (Committed)"]
         O1 --> O2["Offset 2 (Committed)"]
         O2 --> O3["Offset 3 (Committed)"]
@@ -1171,10 +1144,6 @@ graph LR
     style FetchPosition fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style HWPointer fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
     style LEOPointer fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4 stroke:#34d399,stroke-width:2px;
-    linkStyle 5,6 stroke:#c084fc,stroke-width:2px;
-    linkStyle 7,8 stroke:#f0abfc,stroke-width:2px;
 ```
 
 ---
@@ -1218,15 +1187,13 @@ graph TD
     style State3 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style AssignStep fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style State4 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5 stroke:#c084fc,stroke-width:2px;
 ```
 
 #### Group Coordinator Protocol State Machine (LLD)
 
 ```mermaid
 graph TB
-    subgraph RebalanceStateMachine ["Group Coordinator LLD Protocol Execution & Static Membership"]
+    subgraph RebalanceStateMachine ["Group Coordinator LLD Protocol Execution and Static Membership"]
         ClientInit["Consumer Container Start"] --> JoinReq["Send JoinGroup Request (with group.instance.id)"]
         JoinReq --> CoordEval{"Group Coordinator Check"}
 
@@ -1237,13 +1204,13 @@ graph TB
         StaticJoin --> CheckSession{"Rejoin within session.timeout.ms (45s)?"}
 
         CheckSession -->|Yes| BypassRebalance["Bypass Rebalance - Retain Partition Assignment"]
-        CheckSession -->|No| EvictStatic["Evict Static Member & Revoke Partitions"]
+        CheckSession -->|No| EvictStatic["Evict Static Member and Revoke Partitions"]
         EvictStatic --> TriggerFullRebalance
 
         TriggerFullRebalance --> LeaderAssign["Group Leader Computes Cooperative Assignment"]
         LeaderAssign --> SyncReq["Send SyncGroup Request"]
         BypassRebalance --> SyncReq
-        SyncReq --> ActiveLoop["Transition to STABLE - Resume Fetch Loop & Heartbeat"]
+        SyncReq --> ActiveLoop["Transition to STABLE - Resume Fetch Loop and Heartbeat"]
     end
 
     style ClientInit fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
@@ -1258,8 +1225,6 @@ graph TB
     style LeaderAssign fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style SyncReq fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style ActiveLoop fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11 stroke:#c084fc,stroke-width:2px;
 ```
 
 ---
@@ -1311,8 +1276,6 @@ graph TD
     style D0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style D1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style D2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -1356,8 +1319,6 @@ graph TB
     style RetentionCheck fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style UnlinkFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style RetainSegment fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -1442,16 +1403,13 @@ graph TD
         B1 -->|"3. Persist Batch Seq 0"| S1["Partition Log"]
         B1 -.->|"4. Network ACK Drops or Times Out"| P1
         P1 -->|"5. Retry Batch - PID 101 Seq 0"| B1
-        B1 -->|"6. Detect Duplicate Seq 0"| D1["Discard Duplicate Payload & Re-ACK"]
+        B1 -->|"6. Detect Duplicate Seq 0"| D1["Discard Duplicate Payload and Re-ACK"]
     end
 
     style P1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style B1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style S1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style D1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,3,4 stroke:#38bdf8,stroke-width:2px;
-    linkStyle 2,5 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -1481,8 +1439,6 @@ graph TB
     style WriteMarkers fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style WriteComplete fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style TransactionDone fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7 stroke:#38bdf8,stroke-width:2px;
 ```
 
 ---
@@ -1560,8 +1516,6 @@ graph LR
     style CleanerThread fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
     style K1_V2_Post fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style K2_V2_Post fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1 stroke:#f0abfc,stroke-width:2px;
 ```
 
 ---
@@ -1575,7 +1529,7 @@ graph TB
         BuildMap --> ScanDirty["Scan Dirty Log Segments"]
         ScanDirty --> DedupeKeys["Keep Highest Offset Per Message Key"]
         DedupeKeys --> WriteClean["Write Compacted Records to Clean Segment"]
-        WriteClean --> SwapSegments["Atomic File Swap -> Replace Dirty Segment"]
+        WriteClean --> SwapSegments["Atomic File Swap - Replace Dirty Segment"]
         SwapSegments --> PurgeTombstones["Purge Expired Tombstones (delete.retention.ms)"]
     end
 
@@ -1586,8 +1540,6 @@ graph TB
     style WriteClean fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style SwapSegments fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style PurgeTombstones fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5 stroke:#f0abfc,stroke-width:2px;
 ```
 
 ---
@@ -1686,21 +1638,27 @@ graph TD
         ConsumerCLI["kafka-consumer-groups.sh --describe"]
     end
 
-    subgraph RemediationEngine ["Dynamic Remediation & Recovery Execution"]
+    subgraph RemediationEngine ["Dynamic Remediation and Recovery Execution"]
         ConfigsCLI["kafka-configs.sh --alter --add-config retention.ms"]
         ReassignCLI["kafka-reassign-partitions.sh --execute"]
         ResetOffsetCLI["kafka-consumer-groups.sh --reset-offsets --to-latest"]
     end
 
-    subgraph ClusterRecovery ["Cluster & Ingest Stabilization"]
-        StorageReclaimed["OS Disk Space Purged & Reclaimed"]
+    subgraph ClusterRecovery ["Cluster and Ingest Stabilization"]
+        StorageReclaimed["OS Disk Space Purged and Reclaimed"]
         ISRRestored["ISR Pool Fully Synchronized"]
         LagCleared["Ingest Consumer Pipeline Stabilized"]
     end
 
-    Alert1 --> LogDirsCLI --> ConfigsCLI --> StorageReclaimed
-    Alert2 --> TopicsCLI --> ReassignCLI --> ISRRestored
-    Alert3 --> ConsumerCLI --> ResetOffsetCLI --> LagCleared
+    Alert1 --> LogDirsCLI
+    LogDirsCLI --> ConfigsCLI
+    ConfigsCLI --> StorageReclaimed
+    Alert2 --> TopicsCLI
+    TopicsCLI --> ReassignCLI
+    ReassignCLI --> ISRRestored
+    Alert3 --> ConsumerCLI
+    ConsumerCLI --> ResetOffsetCLI
+    ResetOffsetCLI --> LagCleared
 
     style Alert1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
     style Alert2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
@@ -1714,8 +1672,6 @@ graph TD
     style StorageReclaimed fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
     style ISRRestored fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
     style LagCleared fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7,8 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -1729,7 +1685,7 @@ graph TB
         InspectLogDirs --> TargetTopic["Identify Large Log Directories"]
         TargetTopic --> AlterRetention["Execute kafka-configs.sh --add-config retention.ms=3600000"]
         AlterRetention --> TriggerPurge["Broker LogCleaner Thread Scans Inactive Segments"]
-        TriggerPurge --> UnlinkFiles["Unlink Closed Segments -> Space Reclaimed"]
+        TriggerPurge --> UnlinkFiles["Unlink Closed Segments - Space Reclaimed"]
     end
 
     subgraph URPIncidentLLD ["Incident 2: Under-Replicated Partitions Remediation Flow"]
@@ -1768,8 +1724,6 @@ graph TB
     style ResetOffsets fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
     style CommitNewOffset fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style RestartConsumer fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -1827,8 +1781,6 @@ graph LR
     style B1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style B2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style B3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
@@ -1837,13 +1789,13 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph KRaftReplicationLLD ["KRaft Leader Election & Quorum Sync LLD"]
+    subgraph KRaftReplicationLLD ["KRaft Leader Election and Quorum Sync LLD"]
         Controller1["Broker 1 (Active Controller Leader)"] -->|Publish Metadata Record| MetadataLog["@metadata Partition Log"]
         MetadataLog -->|Replicate Metadata Record| Controller2["Broker 2 (Controller Follower)"]
         MetadataLog -->|Replicate Metadata Record| Controller3["Broker 3 (Controller Follower)"]
     end
 
-    subgraph PartitionReplication ["Data Partition Leader & ISR Sync"]
+    subgraph PartitionReplication ["Data Partition Leader and ISR Sync"]
         P_Leader["Partition 0 Leader (Broker 1)"] -->|Fetch Replica Request| P_Follower2["Partition 0 Replica (Broker 2)"]
         P_Leader -->|Fetch Replica Request| P_Follower3["Partition 0 Replica (Broker 3)"]
         P_Follower2 -->|Update LEO in Leader| ISR_Quorum["In-Sync Replicas (ISR Pool)"]
@@ -1861,6 +1813,4 @@ graph TB
     style P_Follower3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style ISR_Quorum fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style AdvanceHW fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
-
-    linkStyle 0,1,2,3,4,5,6,7 stroke:#34d399,stroke-width:2px;
 ```
