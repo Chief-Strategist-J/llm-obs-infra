@@ -308,49 +308,7 @@ To avoid scrolling back and forth between sections, this master reference provid
 
 ## 2. System-Wide Kafka High-Level (HLD) & Low-Level (LLD) Design
 
-### 2.1 System High-Level Design (HLD) — Pure Kafka Architecture
-
-```mermaid
-graph TD
-    subgraph KafkaProducerCluster ["Kafka Producer Layer"]
-        P1["Producer Client Process 1"]
-        P2["Producer Client Process 2"]
-    end
-
-    subgraph KafkaClusterBoundary ["Kafka Broker Cluster Boundary"]
-        subgraph BrokerCore ["llmobs-kafka Broker Process (cgroup 2048M Limit)"]
-            NetListener["Network Socket Listener (Port 9092)"]
-            JVMHeap["JVM Heap (-Xmx1024M)"]
-            PageCache["Linux OS Page Cache"]
-            LogStorage["Partition Log Segments (/var/lib/kafka/data)"]
-        end
-
-        subgraph KRaftQuorum ["KRaft Controller Quorum"]
-            KRaftEngine["KRaft Metadata Engine (@metadata)"]
-        end
-    end
-
-    subgraph KafkaConsumerCluster ["Kafka Consumer Layer"]
-        C1["Consumer Thread 1 (Worker)"]
-        C2["Consumer Thread 2 (Worker)"]
-        Coord["Broker Group Coordinator (__consumer_offsets)"]
-    end
-
-    P1 -->|Produce Batches| NetListener
-    P2 -->|Produce Batches| NetListener
-    NetListener --> JVMHeap
-    JVMHeap --> PageCache
-    PageCache --> LogStorage
-
-    KRaftEngine -->|Metadata Sync| NetListener
-
-    LogStorage -->|Zero-Copy sendfile| C1
-    LogStorage -->|Zero-Copy sendfile| C2
-    C1 -->|Commit Offsets| Coord
-    C2 -->|Commit Offsets| Coord
-```
-
-#### System Integration Configuration & Python Code
+### 2.1 System Integration Configuration & Python Code
 
 ```yaml
 services:
@@ -407,7 +365,67 @@ consumer.subscribe(['llmobs-spans'])
 
 ---
 
-### 2.2 System Low-Level Design (LLD) — End-to-End Execution Flow
+### 2.2 System High-Level Design (HLD) — Pure Kafka Architecture
+
+```mermaid
+graph TD
+    subgraph KafkaProducerCluster ["Kafka Producer Layer"]
+        P1["Producer Client Process 1"]
+        P2["Producer Client Process 2"]
+    end
+
+    subgraph KafkaClusterBoundary ["Kafka Broker Cluster Boundary"]
+        subgraph BrokerCore ["llmobs-kafka Broker Process (cgroup 2048M Limit)"]
+            NetListener["Network Socket Listener (Port 9092)"]
+            JVMHeap["JVM Heap (-Xmx1024M)"]
+            PageCache["Linux OS Page Cache"]
+            LogStorage["Partition Log Segments (/var/lib/kafka/data)"]
+        end
+
+        subgraph KRaftQuorum ["KRaft Controller Quorum"]
+            KRaftEngine["KRaft Metadata Engine (@metadata)"]
+        end
+    end
+
+    subgraph KafkaConsumerCluster ["Kafka Consumer Layer"]
+        C1["Consumer Thread 1 (Worker)"]
+        C2["Consumer Thread 2 (Worker)"]
+        Coord["Broker Group Coordinator (__consumer_offsets)"]
+    end
+
+    P1 -->|Produce Batches| NetListener
+    P2 -->|Produce Batches| NetListener
+    NetListener --> JVMHeap
+    JVMHeap --> PageCache
+    PageCache --> LogStorage
+
+    KRaftEngine -->|Metadata Sync| NetListener
+
+    LogStorage -->|Zero-Copy sendfile| C1
+    LogStorage -->|Zero-Copy sendfile| C2
+    C1 -->|Commit Offsets| Coord
+    C2 -->|Commit Offsets| Coord
+
+    style P1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style NetListener fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style JVMHeap fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style PageCache fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style LogStorage fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style KRaftEngine fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style C1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style C2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style Coord fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1 stroke:#38bdf8,stroke-width:2px;
+    linkStyle 2,3,4 stroke:#34d399,stroke-width:2px;
+    linkStyle 5 stroke:#818cf8,stroke-width:2px;
+    linkStyle 6,7,8,9 stroke:#c084fc,stroke-width:2px;
+```
+
+---
+
+### 2.3 System Low-Level Design (LLD) — End-to-End Execution Flow
 
 ```mermaid
 graph TB
@@ -435,29 +453,37 @@ graph TB
         C_Poll --> C_Commit["Offset Commit Manager (__consumer_offsets)"]
         C_Commit -->|Commit Offsets| B_Net
     end
+
+    style P_App fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P_Ser fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P_Part fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P_Buf fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P_Send fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+
+    style B_Net fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B_ReqQ fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B_Worker fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B_Heap fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B_PageCache fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B_Log fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B_Cleaner fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B_ClosedLog fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    style C_Fetch fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style C_Buf fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style C_Poll fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style C_Commit fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3 stroke:#38bdf8,stroke-width:2px;
+    linkStyle 4,5,6,7,8,9,10 stroke:#34d399,stroke-width:2px;
+    linkStyle 11,12,13,14,15 stroke:#c084fc,stroke-width:2px;
 ```
 
 ---
 
 ## 3. Broker & KRaft Metadata Architecture Deep-Dive
 
-### 3.1 Broker & KRaft High-Level Design (HLD)
-
-```mermaid
-graph TD
-    Client["Producer / Consumer Clients"] -->|Port 9092| SocketListener["Network Socket Listener"]
-    KRaftPeer["KRaft Controller Quorum Peers"] -->|Port 9093| ControllerListener["Controller Listener"]
-
-    subgraph BrokerCoreEngine ["llmobs-kafka Broker Process"]
-        SocketListener --> NetPool["Network Processing Pool"]
-        ControllerListener --> KRaftEngine["KRaft Metadata Engine (@metadata)"]
-        NetPool --> WorkPool["I/O Request Handler Pool"]
-        WorkPool --> MemoryMgr["Memory Manager (Heap vs OS Page Cache)"]
-        MemoryMgr --> LogEngine["Partition Log Storage Engine"]
-    end
-```
-
-#### Broker Configuration & Python Admin Code
+### 3.1 Broker Configuration & Python Admin Code
 
 ```properties
 node.id=1
@@ -497,7 +523,39 @@ for broker_id, broker in cluster_metadata.brokers.items():
 
 ---
 
-### 3.2 Broker Low-Level Design (LLD)
+### 3.2 Broker High-Level Design (HLD)
+
+```mermaid
+graph TD
+    Client["Producer / Consumer Clients"] -->|Port 9092| SocketListener["Network Socket Listener"]
+    KRaftPeer["KRaft Controller Quorum Peers"] -->|Port 9093| ControllerListener["Controller Listener"]
+
+    subgraph BrokerCoreEngine ["llmobs-kafka Broker Process"]
+        SocketListener --> NetPool["Network Processing Pool"]
+        ControllerListener --> KRaftEngine["KRaft Metadata Engine (@metadata)"]
+        NetPool --> WorkPool["I/O Request Handler Pool"]
+        WorkPool --> MemoryMgr["Memory Manager (Heap vs OS Page Cache)"]
+        MemoryMgr --> LogEngine["Partition Log Storage Engine"]
+    end
+
+    style Client fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style KRaftPeer fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style SocketListener fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ControllerListener fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style NetPool fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style KRaftEngine fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style WorkPool fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style MemoryMgr fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style LogEngine fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0 stroke:#38bdf8,stroke-width:2px;
+    linkStyle 1 stroke:#818cf8,stroke-width:2px;
+    linkStyle 2,3,4,5,6 stroke:#34d399,stroke-width:2px;
+```
+
+---
+
+### 3.3 Broker Low-Level Design (LLD)
 
 ```mermaid
 graph TB
@@ -522,11 +580,27 @@ graph TB
         PageCache -->|Flush| TimeIndex["00000000000000000000.timeindex<br/>(Timestamp Index)"]
         PageCache -->|Flush| EpochFile["leader-epoch-checkpoint<br/>(Leader Epochs)"]
     end
+
+    style Acceptor fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style NetThread1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style NetThread2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style RequestQueue fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style IOThread1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style IOThread2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style JVMHeap fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style NativeMem fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style PageCache fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style LogFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style IndexFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TimeIndex fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style EpochFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
 
-### 3.3 Broker Detailed Configuration Breakdown
+### 3.4 Broker Detailed Configuration Breakdown
 
 1. **Parameter**: `KAFKA_HEAP_OPTS`
    - **Definition**: Controls initial (`-Xms`) and maximum (`-Xmx`) physical memory allocated strictly to Java Virtual Machine (JVM) heap objects (broker metadata, active request queues, partition offset indexes, consumer group coordinator state).
@@ -560,66 +634,7 @@ graph TB
 
 ## 4. Producer Architecture & Component Deep-Dive
 
-### 4.1 Producer High-Level Design (HLD)
-
-```mermaid
-graph TD
-    AppThread["Application Thread<br/>send(ProducerRecord)"] --> Serializer["Key/Value Serializers"]
-    Serializer --> Partitioner["Partitioner (MurmurHash2 / RoundRobin)"]
-    Partitioner --> RecordAccumulator["RecordAccumulator (Memory Buffer)"]
-
-    subgraph BackgroundProcessing ["Background I/O Thread"]
-        RecordAccumulator --> SenderThread["Sender Thread"]
-        SenderThread --> SocketChannel["Network Client and SocketChannel"]
-    end
-
-    SocketChannel -->|TCP Produce Request| KafkaBroker["llmobs-kafka Broker"]
-```
-
----
-
-### 4.2 Producer Low-Level Design (LLD)
-
-```mermaid
-graph TB
-    subgraph ProducerMemoryPool ["Producer Memory Pool (buffer.memory = 32MB)"]
-        BatchP0["Partition 0 Batch<br/>(batch.size = 16KB)"]
-        BatchP1["Partition 1 Batch<br/>(batch.size = 16KB)"]
-        BatchP2["Partition 2 Batch<br/>(batch.size = 16KB)"]
-    end
-
-    subgraph BatchTriggerLogic ["Batch Trigger Conditions"]
-        Trigger1["Condition 1: Batch Size Full (16 KB)"]
-        Trigger2["Condition 2: Linger Time Expired (linger.ms = 10ms)"]
-    end
-
-    BatchP0 --> Trigger1
-    BatchP1 --> Trigger1
-    BatchP2 --> Trigger1
-    BatchP0 --> Trigger2
-    BatchP1 --> Trigger2
-    BatchP2 --> Trigger2
-
-    Trigger1 --> SenderThread["Sender Thread"]
-    Trigger2 --> SenderThread
-
-    subgraph InFlightNetworkQueue ["In-Flight Queue (max.in.flight.requests = 5)"]
-        Req1["In-Flight Produce Request 1"]
-        Req2["In-Flight Produce Request 2"]
-    end
-
-    SenderThread --> Req1
-    SenderThread --> Req2
-    Req1 -->|Produce Request| BrokerNode["Broker Leader Replica"]
-    Req2 -->|Produce Request| BrokerNode
-
-    BrokerNode -->|acks=all Response| AckHandler["ACK / Retry Handler"]
-    AckHandler -->|Success| Complete["Complete RecordFuture"]
-    AckHandler -.->|Error and Retries Available| RetryQueue["Retry Backoff (retry.backoff.ms = 100ms)"]
-    RetryQueue --> SenderThread
-```
-
-#### Producer Configuration & Python Producer Code
+### 4.1 Producer Configuration & Python Producer Code
 
 ```python
 from confluent_kafka import Producer
@@ -663,7 +678,94 @@ producer.flush()
 
 ---
 
-### 4.3 Producer Detailed Configuration Breakdown
+### 4.2 Producer High-Level Design (HLD)
+
+```mermaid
+graph TD
+    AppThread["Application Thread<br/>send(ProducerRecord)"] --> Serializer["Key/Value Serializers"]
+    Serializer --> Partitioner["Partitioner (MurmurHash2 / RoundRobin)"]
+    Partitioner --> RecordAccumulator["RecordAccumulator (Memory Buffer)"]
+
+    subgraph BackgroundProcessing ["Background I/O Thread"]
+        RecordAccumulator --> SenderThread["Sender Thread"]
+        SenderThread --> SocketChannel["Network Client and SocketChannel"]
+    end
+
+    SocketChannel -->|TCP Produce Request| KafkaBroker["llmobs-kafka Broker"]
+
+    style AppThread fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Serializer fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Partitioner fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style RecordAccumulator fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style SenderThread fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style SocketChannel fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style KafkaBroker fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4 stroke:#38bdf8,stroke-width:2px;
+    linkStyle 5 stroke:#34d399,stroke-width:2px;
+```
+
+---
+
+### 4.3 Producer Low-Level Design (LLD)
+
+```mermaid
+graph TB
+    subgraph ProducerMemoryPool ["Producer Memory Pool (buffer.memory = 32MB)"]
+        BatchP0["Partition 0 Batch<br/>(batch.size = 16KB)"]
+        BatchP1["Partition 1 Batch<br/>(batch.size = 16KB)"]
+        BatchP2["Partition 2 Batch<br/>(batch.size = 16KB)"]
+    end
+
+    subgraph BatchTriggerLogic ["Batch Trigger Conditions"]
+        Trigger1["Condition 1: Batch Size Full (16 KB)"]
+        Trigger2["Condition 2: Linger Time Expired (linger.ms = 10ms)"]
+    end
+
+    BatchP0 --> Trigger1
+    BatchP1 --> Trigger1
+    BatchP2 --> Trigger1
+    BatchP0 --> Trigger2
+    BatchP1 --> Trigger2
+    BatchP2 --> Trigger2
+
+    Trigger1 --> SenderThread["Sender Thread"]
+    Trigger2 --> SenderThread
+
+    subgraph InFlightNetworkQueue ["In-Flight Queue (max.in.flight.requests = 5)"]
+        Req1["In-Flight Produce Request 1"]
+        Req2["In-Flight Produce Request 2"]
+    end
+
+    SenderThread --> Req1
+    SenderThread --> Req2
+    Req1 -->|Produce Request| BrokerNode["Broker Leader Replica"]
+    Req2 -->|Produce Request| BrokerNode
+
+    BrokerNode -->|acks=all Response| AckHandler["ACK / Retry Handler"]
+    AckHandler -->|Success| Complete["Complete RecordFuture"]
+    AckHandler -.->|Error and Retries Available| RetryQueue["Retry Backoff (retry.backoff.ms = 100ms)"]
+    RetryQueue --> SenderThread
+
+    style BatchP0 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style BatchP1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style BatchP2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Trigger1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Trigger2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style SenderThread fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Req1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Req2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style BrokerNode fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style AckHandler fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Complete fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style RetryQueue fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14 stroke:#38bdf8,stroke-width:2px;
+```
+
+---
+
+### 4.4 Producer Detailed Configuration Breakdown
 
 1. **Parameter**: `acks` / `KAFKA_ACKS`
    - **Definition**: Dictates leader acknowledgment requirements before completing a produce request: `acks=0` (no ACK), `acks=1` (leader ACK only), `acks=all` (leader + all in-sync replicas ACK).
@@ -707,67 +809,7 @@ producer.flush()
 
 ## 5. Consumer Architecture & Component Deep-Dive
 
-### 5.1 Consumer High-Level Design (HLD)
-
-```mermaid
-graph TD
-    subgraph ConsumerGroup ["Consumer Group (llmobs-clickhouse-ingest)"]
-        C1["Consumer Thread 1"]
-        C2["Consumer Thread 2"]
-        C3["Consumer Thread 3"]
-    end
-
-    subgraph BrokerGroupCoordinator ["Broker Group Coordinator"]
-        Coord["Group Coordinator Engine"]
-        OffsetTopic["__consumer_offsets Topic"]
-    end
-
-    subgraph KafkaTopicPartitions ["Telemetry Topic (3 Partitions)"]
-        P0["Partition 0"]
-        P1["Partition 1"]
-        P2["Partition 2"]
-    end
-
-    C1 -->|Fetch & Process| P0
-    C2 -->|Fetch & Process| P1
-    C3 -->|Fetch & Process| P2
-
-    C1 -->|Heartbeat and Offset Commit| Coord
-    C2 -->|Heartbeat and Offset Commit| Coord
-    C3 -->|Heartbeat and Offset Commit| Coord
-    Coord -->|Persist Offsets| OffsetTopic
-```
-
----
-
-### 5.2 Consumer Low-Level Design (LLD)
-
-```mermaid
-graph TB
-    subgraph ConsumerPollExecution ["Consumer Thread Execution Loop"]
-        PollStart["consumer.poll(Duration.ofMillis(100))"] --> CheckQueue{"CompletedFetch Queue Empty?"}
-        CheckQueue -- Yes --> Fetcher["Fetcher Thread sends FetchRequest"]
-        CheckQueue -- No --> ConsumerRecords["Return ConsumerRecords Batch"]
-
-        Fetcher -->|Zero-Copy TCP Read| BrokerStorage["Broker OS Page Cache"]
-        BrokerStorage --> CompletedQueue["CompletedFetch Queue"]
-
-        ConsumerRecords --> AppProcess["Process Batch (e.g. Ingest Records)"]
-        AppProcess --> CommitCheck{"enable.auto.commit = false?"}
-        CommitCheck -- Yes --> ManualCommit["commitSync() / commitAsync()"]
-        CommitCheck -- No --> AutoCommit["Auto Commit (every 5000ms)"]
-        ManualCommit --> OffsetWrite["Write to __consumer_offsets"]
-        AutoCommit --> OffsetWrite
-    end
-
-    subgraph HeartbeatThread ["Background Heartbeat Thread"]
-        HBThread["Heartbeat Thread (heartbeat.interval.ms = 3000)"] -->|Send Heartbeat| CoordNode["Group Coordinator"]
-        CoordNode -->|Liveness Valid| OK["Keep Partition Assignment"]
-        CoordNode -.->|Session Timeout Exceeded 45s| Dead["Mark Consumer Dead and Trigger Rebalance"]
-    end
-```
-
-#### Consumer Manual Commit & Database Ingestion Python Code
+### 5.1 Consumer Configuration & Python Consumer Code
 
 ```python
 from confluent_kafka import Consumer, KafkaError
@@ -806,7 +848,99 @@ finally:
 
 ---
 
-### 5.3 Consumer Detailed Configuration Breakdown
+### 5.2 Consumer High-Level Design (HLD)
+
+```mermaid
+graph TD
+    subgraph ConsumerGroup ["Consumer Group (llmobs-clickhouse-ingest)"]
+        C1["Consumer Thread 1"]
+        C2["Consumer Thread 2"]
+        C3["Consumer Thread 3"]
+    end
+
+    subgraph BrokerGroupCoordinator ["Broker Group Coordinator"]
+        Coord["Group Coordinator Engine"]
+        OffsetTopic["__consumer_offsets Topic"]
+    end
+
+    subgraph KafkaTopicPartitions ["Telemetry Topic (3 Partitions)"]
+        P0["Partition 0"]
+        P1["Partition 1"]
+        P2["Partition 2"]
+    end
+
+    C1 -->|Fetch & Process| P0
+    C2 -->|Fetch & Process| P1
+    C3 -->|Fetch & Process| P2
+
+    C1 -->|Heartbeat and Offset Commit| Coord
+    C2 -->|Heartbeat and Offset Commit| Coord
+    C3 -->|Heartbeat and Offset Commit| Coord
+    Coord -->|Persist Offsets| OffsetTopic
+
+    style C1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style C2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style C3 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style Coord fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style OffsetTopic fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6 stroke:#c084fc,stroke-width:2px;
+```
+
+---
+
+### 5.3 Consumer Low-Level Design (LLD)
+
+```mermaid
+graph TB
+    subgraph ConsumerPollExecution ["Consumer Thread Execution Loop"]
+        PollStart["consumer.poll(Duration.ofMillis(100))"] --> CheckQueue{"CompletedFetch Queue Empty?"}
+        CheckQueue -- Yes --> Fetcher["Fetcher Thread sends FetchRequest"]
+        CheckQueue -- No --> ConsumerRecords["Return ConsumerRecords Batch"]
+
+        Fetcher -->|Zero-Copy TCP Read| BrokerStorage["Broker OS Page Cache"]
+        BrokerStorage --> CompletedQueue["CompletedFetch Queue"]
+
+        ConsumerRecords --> AppProcess["Process Batch (e.g. Ingest Records)"]
+        AppProcess --> CommitCheck{"enable.auto.commit = false?"}
+        CommitCheck -- Yes --> ManualCommit["commitSync() / commitAsync()"]
+        CommitCheck -- No --> AutoCommit["Auto Commit (every 5000ms)"]
+        ManualCommit --> OffsetWrite["Write to __consumer_offsets"]
+        AutoCommit --> OffsetWrite
+    end
+
+    subgraph HeartbeatThread ["Background Heartbeat Thread"]
+        HBThread["Heartbeat Thread (heartbeat.interval.ms = 3000)"] -->|Send Heartbeat| CoordNode["Group Coordinator"]
+        CoordNode -->|Liveness Valid| OK["Keep Partition Assignment"]
+        CoordNode -.->|Session Timeout Exceeded 45s| Dead["Mark Consumer Dead and Trigger Rebalance"]
+    end
+
+    style PollStart fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style CheckQueue fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style Fetcher fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style ConsumerRecords fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style CompletedQueue fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style AppProcess fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style CommitCheck fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style ManualCommit fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style AutoCommit fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style HBThread fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+
+    style BrokerStorage fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style OffsetWrite fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style CoordNode fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style OK fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style Dead fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13 stroke:#c084fc,stroke-width:2px;
+```
+
+---
+
+### 5.4 Consumer Detailed Configuration Breakdown
 
 1. **Parameter**: `enable.auto.commit` & `auto.commit.interval.ms`
    - **Definition**: Controls whether consumer offsets are committed automatically in the background on a periodic timer or managed explicitly by application code.
@@ -850,29 +984,6 @@ finally:
 
 ### 6.1 Topic Partitioning & Key Hashing Mechanics
 
-```mermaid
-graph TD
-    subgraph PartitionerEngine ["Kafka Partitioner Architecture"]
-        Record["ProducerRecord (Key, Value)"] --> CheckKey{"Record Key Provided?"}
-        CheckKey -- Yes --> MurmurHash["MurmurHash2 Algorithm (to32Bits)"]
-        MurmurHash --> ModuloOp["(hash & 0x7fffffff) % num_partitions"]
-        ModuloOp --> TargetPartition["Target Partition ID"]
-
-        CheckKey -- No --> StickyPartitioner["Sticky Partitioner (Batch Pool)"]
-        StickyPartitioner --> CurrentBatchPartition["Active Batch Partition"]
-    end
-```
-
-```mermaid
-graph TB
-    subgraph PartitionHotspotting ["Partition Hashing & Skew Mechanics"]
-        Key1["Key: 'trace_101'"] --> H1["Hash: 41208571"] --> P0["Partition 0 (33% Load)"]
-        Key2["Key: 'trace_102'"] --> H2["Hash: 89012444"] --> P1["Partition 1 (33% Load)"]
-        Key3["Key: 'trace_103'"] --> H3["Hash: 12048912"] --> P2["Partition 2 (33% Load)"]
-        NullKey["Key: None"] --> Sticky["Sticky Batcher"] --> P0
-    end
-```
-
 #### Topic Creation & Partition Key Hashing Python Code
 
 ```python
@@ -904,35 +1015,60 @@ def calculate_kafka_partition(key_bytes, num_partitions=3):
 print(f"Key 'trace_101' maps to Partition: {calculate_kafka_partition(b'trace_101')}")
 ```
 
----
-
-### 6.2 Offset Pointers, Log End Offset (LEO), High Watermark (HW) & Leader Epochs
+#### Partitioner High-Level Architecture (HLD)
 
 ```mermaid
-graph LR
-    subgraph LogSegmentPointers ["Partition Log Offset & Watermark Architecture"]
-        O0["Offset 0<br/>(Committed)"] --- O1["Offset 1<br/>(Committed)"]
-        O1 --- O2["Offset 2<br/>(Committed)"]
-        O2 --- O3["Offset 3<br/>(Committed)"]
-        O3 --- O4["Offset 4<br/>(Uncommitted)"]
-        O4 --- O5["Offset 5<br/>(Log End)"]
+graph TD
+    subgraph PartitionerEngine ["Kafka Partitioner Architecture"]
+        Record["ProducerRecord (Key, Value)"] --> CheckKey{"Record Key Provided?"}
+        CheckKey -- Yes --> MurmurHash["MurmurHash2 Algorithm (to32Bits)"]
+        MurmurHash --> ModuloOp["(hash & 0x7fffffff) % num_partitions"]
+        ModuloOp --> TargetPartition["Target Partition ID"]
+
+        CheckKey -- No --> StickyPartitioner["Sticky Partitioner (Batch Pool)"]
+        StickyPartitioner --> CurrentBatchPartition["Active Batch Partition"]
     end
 
-    CommittedPointer["Consumer Committed Offset Pointer: 2<br/>(__consumer_offsets)"] --> O2
-    FetchPosition["Consumer Fetch Position Pointer: 3"] --> O3
-    HWPointer["High Watermark (HW): 4<br/>(Max Safe Readable Offset)"] --> O4
-    LEOPointer["Log End Offset (LEO): 5<br/>(Next Write Target)"] --> O5
+    style Record fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style CheckKey fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style MurmurHash fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style ModuloOp fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style TargetPartition fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style StickyPartitioner fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style CurrentBatchPartition fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5 stroke:#38bdf8,stroke-width:2px;
 ```
+
+#### Partition Skew & Hashing Mechanics (LLD)
 
 ```mermaid
 graph TB
-    subgraph ReplicationWatermarks ["Leader vs Replica Watermark Sync"]
-        LeaderLEO["Leader Replica LEO: 10"] --> LeaderHW["Leader High Watermark (HW): 8"]
-        Follower1LEO["Follower 1 Replica LEO: 8"] --> LeaderHW
-        Follower2LEO["Follower 2 Replica LEO: 8"] --> LeaderHW
-        LeaderHW --> ConsumerVisible["Consumers can ONLY read up to HW: 8"]
+    subgraph PartitionHotspotting ["Partition Hashing & Skew Mechanics"]
+        Key1["Key: 'trace_101'"] --> H1["Hash: 41208571"] --> P0["Partition 0 (33% Load)"]
+        Key2["Key: 'trace_102'"] --> H2["Hash: 89012444"] --> P1["Partition 1 (33% Load)"]
+        Key3["Key: 'trace_103'"] --> H3["Hash: 12048912"] --> P2["Partition 2 (33% Load)"]
+        NullKey["Key: None"] --> Sticky["Sticky Batcher"] --> P0
     end
+
+    style Key1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Key2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Key3 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style NullKey fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style H1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style H2 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style H3 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Sticky fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style P0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7 stroke:#38bdf8,stroke-width:2px;
 ```
+
+---
+
+### 6.2 Offset Pointers, Log End Offset (LEO), High Watermark (HW) & Leader Epochs
 
 #### Consumer Offset Seeking & Inspection Python Code
 
@@ -960,21 +1096,64 @@ if msg:
 consumer.close()
 ```
 
+#### Replication Watermarks & High Watermark Sync (HLD)
+
+```mermaid
+graph TB
+    subgraph ReplicationWatermarks ["Leader vs Replica Watermark Sync"]
+        LeaderLEO["Leader Replica LEO: 10"] --> LeaderHW["Leader High Watermark (HW): 8"]
+        Follower1LEO["Follower 1 Replica LEO: 8"] --> LeaderHW
+        Follower2LEO["Follower 2 Replica LEO: 8"] --> LeaderHW
+        LeaderHW --> ConsumerVisible["Consumers can ONLY read up to HW: 8"]
+    end
+
+    style LeaderLEO fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style Follower1LEO fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style Follower2LEO fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style LeaderHW fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style ConsumerVisible fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2 stroke:#34d399,stroke-width:2px;
+    linkStyle 3 stroke:#f0abfc,stroke-width:2px;
+```
+
+#### Partition Log Offset & Pointer Layout (LLD)
+
+```mermaid
+graph LR
+    subgraph LogSegmentPointers ["Partition Log Offset & Watermark Architecture"]
+        O0["Offset 0<br/>(Committed)"] --- O1["Offset 1<br/>(Committed)"]
+        O1 --- O2["Offset 2<br/>(Committed)"]
+        O2 --- O3["Offset 3<br/>(Committed)"]
+        O3 --- O4["Offset 4<br/>(Uncommitted)"]
+        O4 --- O5["Offset 5<br/>(Log End)"]
+    end
+
+    CommittedPointer["Consumer Committed Offset Pointer: 2<br/>(__consumer_offsets)"] --> O2
+    FetchPosition["Consumer Fetch Position Pointer: 3"] --> O3
+    HWPointer["High Watermark (HW): 4<br/>(Max Safe Readable Offset)"] --> O4
+    LEOPointer["Log End Offset (LEO): 5<br/>(Next Write Target)"] --> O5
+
+    style O0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style O1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style O2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style O3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style O4 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style O5 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    style CommittedPointer fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style FetchPosition fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style HWPointer fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style LEOPointer fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4 stroke:#34d399,stroke-width:2px;
+    linkStyle 5,6 stroke:#c084fc,stroke-width:2px;
+    linkStyle 7,8 stroke:#f0abfc,stroke-width:2px;
+```
+
 ---
 
 ### 6.3 Consumer Group Rebalance Protocols & Static Membership
-
-```mermaid
-graph TD
-    subgraph CooperativeRebalance ["Cooperative Sticky Rebalance Protocol"]
-        State1["Group State: STABLE"] --> MemberJoin["New Consumer Joins / Departs"]
-        MemberJoin --> State2["Group State: PREPARING_REBALANCE"]
-        State2 --> RevokeStep["Revoke ONLY Migrating Partitions (Cooperative)"]
-        RevokeStep --> State3["Group State: COMPLETING_REBALANCE"]
-        State3 --> AssignStep["Assign Revoked Partitions to New Member"]
-        AssignStep --> State4["Group State: STABLE (Zero Downtime for Unaffected Partitions)"]
-    end
-```
 
 #### Consumer Static Membership Python Code
 
@@ -993,11 +1172,57 @@ static_consumer = Consumer({
 static_consumer.subscribe(['llmobs-spans'])
 ```
 
+#### Cooperative Sticky Rebalance Protocol Architecture (HLD)
+
+```mermaid
+graph TD
+    subgraph CooperativeRebalance ["Cooperative Sticky Rebalance Protocol"]
+        State1["Group State: STABLE"] --> MemberJoin["New Consumer Joins / Departs"]
+        MemberJoin --> State2["Group State: PREPARING_REBALANCE"]
+        State2 --> RevokeStep["Revoke ONLY Migrating Partitions (Cooperative)"]
+        RevokeStep --> State3["Group State: COMPLETING_REBALANCE"]
+        State3 --> AssignStep["Assign Revoked Partitions to New Member"]
+        AssignStep --> State4["Group State: STABLE (Zero Downtime for Unaffected Partitions)"]
+    end
+
+    style State1 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style MemberJoin fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style State2 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style RevokeStep fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style State3 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style AssignStep fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style State4 fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5 stroke:#c084fc,stroke-width:2px;
+```
+
 ---
 
 ## 7. Topic Segment Lifecycle & Physical Storage Management
 
-### 7.1 Topic Segment Storage HLD & LLD
+### 7.1 Topic Segment Storage Configuration & Code
+
+```python
+from confluent_kafka.admin import AdminClient, NewTopic
+
+admin = AdminClient({'bootstrap.servers': 'localhost:31414'})
+topic_spec = NewTopic(
+    'llmobs-spans',
+    num_partitions=3,
+    replication_factor=1,
+    config={
+        'segment.bytes': '104857600',
+        'retention.ms': '86400000',
+        'segment.ms': '7200000',
+        'cleanup.policy': 'delete'
+    }
+)
+admin.create_topics([topic_spec])
+```
+
+---
+
+### 7.2 Topic Segment Storage High-Level Design (HLD)
 
 ```mermaid
 graph TD
@@ -1013,7 +1238,20 @@ graph TD
         P1 --> D1["/var/lib/kafka/data/llmobs-spans-1/"]
         P2 --> D2["/var/lib/kafka/data/llmobs-spans-2/"]
     end
+
+    style P0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style P2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style D0 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style D1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style D2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2 stroke:#34d399,stroke-width:2px;
 ```
+
+---
+
+### 7.3 Topic Segment Storage Low-Level Design (LLD)
 
 ```mermaid
 graph TB
@@ -1040,11 +1278,26 @@ graph TB
 
         CloseSegment --> CleanerScan
     end
+
+    style WriteOp fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style ActiveSegment fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style RollCondition fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style CloseSegment fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style OpenNew fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style KeepWriting fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style OffsetIndex fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TimeIndex fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style CleanerScan fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style RetentionCheck fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style UnlinkFile fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style RetainSegment fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2,3,4,5,6,7,8,9 stroke:#34d399,stroke-width:2px;
 ```
 
 ---
 
-### 7.2 Topic & Partition Detailed Configuration Breakdown
+### 7.4 Topic Segment Detailed Configuration Breakdown
 
 1. **Parameter**: `log.segment.bytes`
    - **Definition**: Maximum byte size per partition segment file before closing and rolling a new active segment file.
@@ -1076,21 +1329,7 @@ graph TB
 
 ## 8. Exactly-Once Semantics (EOS), Idempotency & Transactions
 
-### 8.1 Idempotent Producer Mechanics (`enable.idempotence=true`)
-
-```mermaid
-graph TD
-    subgraph IdempotentProtocol ["Idempotent Producer Protocol"]
-        P1["Producer Client (enable.idempotence=true)"] -->|1. Allocate Producer ID (PID)| B1["Broker Sequence Tracker"]
-        P1 -->|2. Send Record Batch (PID: 101, Seq: 0)| B1
-        B1 -->|3. Persist Batch Seq 0| S1["Partition Log"]
-        B1 -.->|4. Network ACK Drops / Times Out| P1
-        P1 -->|5. Retry Batch (PID: 101, Seq: 0)| B1
-        B1 -->|6. Detect Duplicate Seq 0| D1["Discard Duplicate Payload & Re-ACK"]
-    end
-```
-
-#### Transactional Producer & EOS Python Code
+### 8.1 Transactional Producer & EOS Python Code
 
 ```python
 from confluent_kafka import Producer, Consumer
@@ -1128,7 +1367,31 @@ eos_consumer = Consumer({
 
 ---
 
-### 8.2 EOS Configuration Breakdown
+### 8.2 Idempotent Producer Mechanics (`enable.idempotence=true`)
+
+```mermaid
+graph TD
+    subgraph IdempotentProtocol ["Idempotent Producer Protocol"]
+        P1["Producer Client (enable.idempotence=true)"] -->|1. Allocate Producer ID (PID)| B1["Broker Sequence Tracker"]
+        P1 -->|2. Send Record Batch (PID: 101, Seq: 0)| B1
+        B1 -->|3. Persist Batch Seq 0| S1["Partition Log"]
+        B1 -.->|4. Network ACK Drops / Times Out| P1
+        P1 -->|5. Retry Batch (PID: 101, Seq: 0)| B1
+        B1 -->|6. Detect Duplicate Seq 0| D1["Discard Duplicate Payload & Re-ACK"]
+    end
+
+    style P1 fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style B1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style S1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style D1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,3,4 stroke:#38bdf8,stroke-width:2px;
+    linkStyle 2,5 stroke:#34d399,stroke-width:2px;
+```
+
+---
+
+### 8.3 EOS Configuration Breakdown
 
 1. **Parameter**: `enable.idempotence`
    - **Definition**: Ensures that the broker processes exactly one copy of a message batch sent by a producer, even if the producer retries due to network timeouts.
@@ -1150,7 +1413,27 @@ eos_consumer = Consumer({
 
 ## 9. Log Compaction Mechanics & Cleanup Policies (`cleanup.policy`)
 
-### 9.1 Log Compaction Lifecycle
+### 9.1 State Store Compaction Python Code
+
+```python
+from confluent_kafka import Producer
+
+producer = Producer({
+    'bootstrap.servers': 'localhost:31414',
+    'acks': 'all',
+    'enable.idempotence': True,
+    'linger.ms': 10,
+    'batch.size': 16384
+})
+
+producer.produce('user-service-registry', key='service_auth', value='v2.1.0')
+producer.produce('user-service-registry', key='service_deprecated', value=None)
+producer.flush()
+```
+
+---
+
+### 9.2 Log Compaction Lifecycle Design (HLD)
 
 ```mermaid
 graph LR
@@ -1173,29 +1456,21 @@ graph LR
     end
 
     CleanerThread --> AfterCompaction
-```
 
-#### Compaction State Store & Tombstone Deletion Python Code
+    style K1_V1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style K2_V1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style K1_V2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style K2_V2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style CleanerThread fill:#701a75,stroke:#f0abfc,stroke-width:2px,color:#f8fafc
+    style K1_V2_Post fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style K2_V2_Post fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
 
-```python
-from confluent_kafka import Producer
-
-producer = Producer({
-    'bootstrap.servers': 'localhost:31414',
-    'acks': 'all',
-    'enable.idempotence': True,
-    'linger.ms': 10,
-    'batch.size': 16384
-})
-
-producer.produce('user-service-registry', key='service_auth', value='v2.1.0')
-producer.produce('user-service-registry', key='service_deprecated', value=None)
-producer.flush()
+    linkStyle 0,1 stroke:#f0abfc,stroke-width:2px;
 ```
 
 ---
 
-### 9.2 Compaction Configuration Breakdown
+### 9.3 Compaction Configuration Breakdown
 
 1. **Parameter**: `cleanup.policy`
    - **Definition**: `delete` purges closed segments based on time/size. `compact` retains the latest record value per message key forever. `compact,delete` compacts by key and enforces time-based expiration.
@@ -1275,21 +1550,7 @@ docker exec -it llmobs-kafka-broker kafka-consumer-groups.sh \
 
 ## 11. Multi-Broker Scale-Out Architecture (Single-Node to 3-Node KRaft)
 
-```mermaid
-graph TB
-    subgraph MultiBrokerCluster ["Multi-Broker KRaft Cluster Architecture"]
-        direction LR
-        B1["Kafka Broker 1 (Node ID 1)<br/>Heap: 2048M | cgroup: 4096M"]
-        B2["Kafka Broker 2 (Node ID 2)<br/>Heap: 2048M | cgroup: 4096M"]
-        B3["Kafka Broker 3 (Node ID 3)<br/>Heap: 2048M | cgroup: 4096M"]
-
-        B1 -->|KRaft Sync| B2
-        B2 -->|KRaft Sync| B3
-        B3 -->|KRaft Sync| B1
-    end
-```
-
-#### Multi-Broker Production Override Configuration & Connection Code
+### 11.1 Multi-Broker Production Override Configuration & Connection Code
 
 ```yaml
 services:
@@ -1319,4 +1580,28 @@ cluster_producer = Producer({
     'retries': 10,
     'retry.backoff.ms': 100
 })
+```
+
+---
+
+### 11.2 Multi-Broker KRaft Cluster Architecture Design (HLD)
+
+```mermaid
+graph TB
+    subgraph MultiBrokerCluster ["Multi-Broker KRaft Cluster Architecture"]
+        direction LR
+        B1["Kafka Broker 1 (Node ID 1)<br/>Heap: 2048M | cgroup: 4096M"]
+        B2["Kafka Broker 2 (Node ID 2)<br/>Heap: 2048M | cgroup: 4096M"]
+        B3["Kafka Broker 3 (Node ID 3)<br/>Heap: 2048M | cgroup: 4096M"]
+
+        B1 -->|KRaft Sync| B2
+        B2 -->|KRaft Sync| B3
+        B3 -->|KRaft Sync| B1
+    end
+
+    style B1 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B2 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style B3 fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0,1,2 stroke:#34d399,stroke-width:2px;
 ```
