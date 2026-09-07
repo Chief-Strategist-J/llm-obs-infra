@@ -533,8 +533,8 @@ graph LR
         DebugSink["Debug Console (stdout)"]
     end
 
-    SDKClient -->|gRPC TLS (31418)| GRPCReceiver
-    BrowserApp -->|HTTP/JSON TLS (31417)| HTTPReceiver
+    SDKClient -->|gRPC TLS Port 31418| GRPCReceiver
+    BrowserApp -->|HTTP JSON TLS Port 31417| HTTPReceiver
 
     GRPCReceiver --> MemGate
     HTTPReceiver --> MemGate
@@ -711,8 +711,8 @@ graph LR
 
     subgraph ProtocolDecoding ["Protocol Parsing Layer"]
         EncryptedStream --> StreamDetect{"Transport Protocol"}
-        StreamDetect -->|gRPC / HTTP2| H2Framer["HTTP/2 Frame Reader (Zero-Copy Buffer)"]
-        StreamDetect -->|HTTP/1.1| RESTParser["HTTP Request Parser (/v1/traces)"]
+        StreamDetect -->|gRPC or HTTP2| H2Framer["HTTP/2 Frame Reader Zero-Copy Buffer"]
+        StreamDetect -->|HTTP 1.1| RESTParser["HTTP Request Parser v1 traces"]
     end
 
     subgraph MemoryMapping ["Memory Materialization"]
@@ -829,11 +829,11 @@ graph TD
     end
 
     subgraph StateLogic ["Threshold Evaluation"]
-        AllocHeap --> CheckSoft{"Allocated Heap > 640 MiB?"}
-        CheckSoft -->|No: < 640 MiB| NormalMode["Mode: Pass All Spans"]
-        CheckSoft -->|Yes| CheckHard{"Allocated Heap > 800 MiB?"}
+        AllocHeap --> CheckSoft{"Allocated Heap Exceeds 640 MiB?"}
+        CheckSoft -->|No: Under 640 MiB| NormalMode["Mode: Pass All Spans"]
+        CheckSoft -->|Yes| CheckHard{"Allocated Heap Exceeds 800 MiB?"}
         CheckHard -->|No: 640M to 800M| SoftMode["Mode: Proportional Dropping"]
-        CheckHard -->|Yes: > 800M| HardMode["Mode: 100% Rejection"]
+        CheckHard -->|Yes: Over 800M| HardMode["Mode: 100% Rejection"]
     end
 
     subgraph GCPacing ["Go Runtime GC Coordination"]
@@ -950,8 +950,8 @@ graph TD
     SpanAttrs --> SpanParser
     SpanEvts --> EventParser
 
-    ResParser -->|Redacted API/AWS Keys| CleanRes
-    SpanParser -->|Redacted JWT, Token, Email, Cards| CleanSpan
+    ResParser -->|Redacted API and AWS Keys| CleanRes
+    SpanParser -->|Redacted JWT Token Email Cards| CleanSpan
     EventParser -->|Redacted Exception Secrets| CleanEvents
 
     style ResMeta fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
@@ -1347,13 +1347,13 @@ graph TD
     end
 
     subgraph SuccessPath ["Success Path"]
-        ResponseCheck -->|Status: OK| AckBatch["Acknowledge and Release Batch Memory"]
+        ResponseCheck -->|Status OK| AckBatch["Acknowledge and Release Batch Memory"]
     end
 
     subgraph RetryStateMachine ["Exponential Backoff Retry Engine"]
-        ResponseCheck -->|Transient Error / 503| CheckElapsed{"Elapsed Time < max_elapsed_time (5m)?"}
-        CheckElapsed -->|Yes| CalcBackoff["Calculate Backoff = min(initial * 2^attempt, max_interval)"]
-        CalcBackoff --> SleepWait["time.Sleep(Backoff + Jitter)"]
+        ResponseCheck -->|Transient Error 503| CheckElapsed{"Elapsed Time Under 5m?"}
+        CheckElapsed -->|Yes| CalcBackoff["Calculate Exponential Backoff Interval"]
+        CalcBackoff --> SleepWait["time.Sleep with Jitter"]
         SleepWait --> CallExport
         CheckElapsed -->|No: Timeout Breached| DropBatch["Drop Batch and Increment Dropped Counter"]
     end
@@ -1458,7 +1458,7 @@ graph TD
     subgraph MiddlewareChain ["Middleware Filter Execution"]
         SecHeaders --> RateLimit{"Evaluate rate-limit-ingest (Max Req/Sec)"}
         RateLimit -->|Exceeded| Reject429["Return 429 Too Many Requests"]
-        RateLimit -->|Within Limit| PayloadCheck{"Evaluate payload-limit (Body <= 10MB)"}
+        RateLimit -->|Within Limit| PayloadCheck{"Evaluate Body Size Under 10MB"}
         PayloadCheck -->|Exceeded| Reject413["Return 413 Payload Too Large"]
         PayloadCheck -->|Within Limit| ForwardBackend["Proxy to http://llmobs-otel-collector:4318"]
     end
@@ -1538,9 +1538,9 @@ graph LR
         SREBrowser["SRE Diagnostic Browser"]
     end
 
-    DockerEngine -->|GET / (Interval: 10s)| HealthExt
-    PrometheusServer -->|Scrape /metrics| MetricsServer
-    SREBrowser -->|Inspect /debug/tracez| ZPagesExt
+    DockerEngine -->|Health Check Probe| HealthExt
+    PrometheusServer -->|Scrape Metrics Endpoint| MetricsServer
+    SREBrowser -->|Inspect Tracez Diagnostics| ZPagesExt
 
     style HealthExt fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#f8fafc
     style ZPagesExt fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#f8fafc
@@ -1646,8 +1646,8 @@ graph TD
         ClickHouseCluster["ClickHouse Analytics Cluster"]
     end
 
-    TraefikCluster -->|gRPC / HTTP Stream| CollectorA
-    TraefikCluster -->|gRPC / HTTP Stream| CollectorB
+    TraefikCluster -->|Forward Ingestion Stream| CollectorA
+    TraefikCluster -->|Forward Ingestion Stream| CollectorB
 
     CollectorA -->|Flush Batches| TempoDistributor
     CollectorB -->|Flush Batches| TempoDistributor
@@ -1669,7 +1669,7 @@ graph TD
 ```mermaid
 graph LR
     subgraph TraceRouting ["Trace Routing Phase"]
-        TraceIn["Inbound Span with TraceID"] --> HashFunc["Hash(TraceID) % ReplicaCount"]
+        TraceIn["Inbound Span with TraceID"] --> HashFunc["Hash TraceID by Replica Count"]
         HashFunc --> RouteDecision{"Instance Target"}
     end
 
@@ -1756,7 +1756,7 @@ graph TD
     end
 
     subgraph DiagnosisPhase ["Diagnostic Triage"]
-        CheckOOM{"OOMKilled == true?"}
+        CheckOOM{"OOMKilled is True?"}
         CheckDownstream{"Tempo Connection Healthy?"}
     end
 

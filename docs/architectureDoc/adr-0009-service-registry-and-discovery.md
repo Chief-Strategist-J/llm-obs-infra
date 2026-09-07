@@ -93,48 +93,45 @@ The service discovery architecture bridges ingestion microservices, asynchronous
 
 ```mermaid
 flowchart TD
-    subgraph Clients["1. CLIENT & INGESTION LAYER"]
+    subgraph Clients ["1. CLIENT and INGESTION LAYER"]
         FastAPI["FastAPI Ingestion SDK (:8000)"]
         NextJS["Next.js Web Portal (:31400)"]
-        Workers["Async Consumer Workers (Cost, NLI, Quality)"]
+        Workers["Async Consumer Workers"]
     end
 
-    subgraph GatewayPlane["2. INGRESS & TRAFFIC MANAGEMENT PLANE"]
-        Traefik["Traefik v3 Ingress Gateway (:31410 / :31419)<br/>Reverse Proxy, TLS Termination & Edge Load Balancer"]
-        DynamicConfig[("discovery.yml<br/>Dynamic File Provider")]
+    subgraph GatewayPlane ["2. INGRESS and TRAFFIC MANAGEMENT PLANE"]
+        Traefik["Traefik v3 Ingress Gateway - Reverse Proxy and TLS Termination"]
+        DynamicConfig["discovery.yml Dynamic File Provider"]
     end
 
-    subgraph ControlPlane["3. SERVICE DISCOVERY CONTROL PLANE (:31426)"]
-        RegistryEngine["llmobs-service-registry (Go Engine)<br/>In-Memory Dual-State Engine"]
-        SeedCatalog[("Seed Catalog File<br/>config/service-registry/services.json")]
-        TraefikExporter["Atomic File Exporter<br/>(Periodic State Reconciler)"]
+    subgraph ControlPlane ["3. SERVICE DISCOVERY CONTROL PLANE (:31426)"]
+        RegistryEngine["llmobs-service-registry - In-Memory Dual-State Engine"]
+        SeedCatalog["Seed Catalog File - config/service-registry/services.json"]
+        TraefikExporter["Atomic File Exporter - Periodic State Reconciler"]
     end
 
-    subgraph DatabasePlane["4. CORE PLATFORM STORAGE & MESSAGING PLANE"]
-        AlloyDB[("Google AlloyDB Omni 15 (:31420)<br/>Relational & Transactional DB")]
-        ClickHouse[("ClickHouse v24.8 (:8123)<br/>Columnar Telemetry Analytics")]
-        RedisStore[("Redis v7 (:31413)<br/>Micro-USD Spend Ledger")]
-        KafkaBus[("Apache Kafka KRaft (:31414)<br/>Streaming Message Bus")]
-        TempoTrace[("Grafana Tempo (:31416)<br/>Distributed Trace Waterfalls")]
-        OtelCol[("OTEL Collector (:31417)<br/>Telemetry Enrichment Pipeline")]
+    subgraph DatabasePlane ["4. CORE PLATFORM STORAGE and MESSAGING PLANE"]
+        AlloyDB["Google AlloyDB Omni 15 - Relational and Transactional DB"]
+        ClickHouse["ClickHouse v24.8 - Columnar Telemetry Analytics"]
+        RedisStore["Redis v7 - Micro-USD Spend Ledger"]
+        KafkaBus["Apache Kafka KRaft - Streaming Message Bus"]
+        TempoTrace["Grafana Tempo - Distributed Trace Waterfalls"]
+        OtelCol["OTEL Collector - Telemetry Enrichment Pipeline"]
     end
 
-    %% Registrations & Probing
     SeedCatalog -->|Bootstrap Seeds| RegistryEngine
-    FastAPI -->|POST /v1/register & /v1/heartbeat| RegistryEngine
-    Workers -->|GET /v1/resolve?service={name}| RegistryEngine
+    FastAPI -->|Register and Heartbeat| RegistryEngine
+    Workers -->|Resolve Service Query| RegistryEngine
     
-    RegistryEngine -->|Active TCP Probes (5s)| AlloyDB
-    RegistryEngine -->|Active HTTP Probes /ping (5s)| ClickHouse
-    RegistryEngine -->|Active TCP Probes (5s)| RedisStore
-    RegistryEngine -->|Active TCP Probes (5s)| KafkaBus
+    RegistryEngine -->|Active TCP Probes| AlloyDB
+    RegistryEngine -->|Active HTTP Probes| ClickHouse
+    RegistryEngine -->|Active TCP Probes| RedisStore
+    RegistryEngine -->|Active TCP Probes| KafkaBus
 
-    %% Traefik Reconciliation
     RegistryEngine --> TraefikExporter
-    TraefikExporter -->|Atomic Tempfile + Rename| DynamicConfig
-    DynamicConfig -.->|Inotify Dynamic Reload| Traefik
+    TraefikExporter -->|Atomic Write and Rename| DynamicConfig
+    DynamicConfig -.->|Dynamic Reload| Traefik
 
-    %% Traffic Routing
     NextJS -->|Traverse Ingress| Traefik
     Traefik -->|Route Verified Requests| ClickHouse
     Traefik -->|Route Verified Requests| TempoTrace
@@ -149,7 +146,7 @@ The service registry engine is written in pure Go without heavyweight external f
 
 ```mermaid
 flowchart LR
-    subgraph IngressAPI["REST Request Ingress"]
+    subgraph IngressAPI ["REST Request Ingress"]
         R_Reg["POST /v1/register"]
         R_HB["POST /v1/heartbeat"]
         R_List["GET /v1/services"]
@@ -157,28 +154,28 @@ flowchart LR
         R_Health["GET /health"]
     end
 
-    subgraph RequestPipeline["Request Interceptor Pipeline"]
-        TraceMW["TraceContextMiddleware<br/>(W3C traceparent extraction)"]
-        AuthVal["Security & CIDR Validator<br/>(HMAC Bearer & RFC 1918 Private Subnets)"]
-        EnvelopeOut["Envelope Response Formatter<br/>(Consistent REST API Schema)"]
+    subgraph RequestPipeline ["Request Interceptor Pipeline"]
+        TraceMW["TraceContextMiddleware - W3C traceparent extraction"]
+        AuthVal["Security and CIDR Validator - HMAC Bearer and RFC 1918 Subnets"]
+        EnvelopeOut["Envelope Response Formatter - Consistent REST Schema"]
     end
 
-    subgraph CoreEngine["In-Memory Concurrent State Engine"]
+    subgraph CoreEngine ["In-Memory Concurrent State Engine"]
         RWMutex["sync.RWMutex Lock"]
-        StateStore[("map[ServiceName]map[InstanceID]*ServiceInstance")]
+        StateStore["Indexed Service Instance Map"]
     end
 
-    subgraph AsyncDaemons["Concurrent Background Goroutines"]
-        LeaseSweeper["Lease Sweeper (3s Ticker)<br/>Checks Heartbeat TTL (15s)"]
-        ActiveProber["Active Prober (5s Ticker)<br/>TCP socket & HTTP GET /ping dials"]
-        TraefikReconciler["Traefik Reconciler (5s Ticker)<br/>Atomic write to discovery.yml"]
+    subgraph AsyncDaemons ["Concurrent Background Goroutines"]
+        LeaseSweeper["Lease Sweeper - Checks Heartbeat TTL"]
+        ActiveProber["Active Prober - TCP socket and HTTP GET dials"]
+        TraefikReconciler["Traefik Reconciler - Atomic write to discovery.yml"]
     end
 
-    subgraph ExternalTargets["External Probing Targets"]
-        DB_Alloy["AlloyDB Omni (TCP :5432)"]
-        DB_Click["ClickHouse (HTTP :8123/ping)"]
-        DB_Redis["Redis (TCP :6379)"]
-        DB_Kafka["Kafka (TCP :9092)"]
+    subgraph ExternalTargets ["External Probing Targets"]
+        DB_Alloy["AlloyDB Omni (TCP Port 5432)"]
+        DB_Click["ClickHouse (HTTP Port 8123 ping)"]
+        DB_Redis["Redis (TCP Port 6379)"]
+        DB_Kafka["Kafka (TCP Port 9092)"]
     end
 
     IngressAPI --> TraceMW
@@ -187,8 +184,10 @@ flowchart LR
     RWMutex --> StateStore
     StateStore --> EnvelopeOut
 
-    StateStore <--> LeaseSweeper
-    StateStore <--> ActiveProber
+    StateStore --> LeaseSweeper
+    LeaseSweeper --> StateStore
+    StateStore --> ActiveProber
+    ActiveProber --> StateStore
     StateStore --> TraefikReconciler
 
     ActiveProber --> DB_Alloy

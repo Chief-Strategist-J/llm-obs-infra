@@ -70,8 +70,8 @@ graph LR
     AlertSinks["Alert Destinations (PagerDuty / Slack / Webhooks)"]:::external
 
     PythonSDK -->|"1. HTTPS / OTLP gRPC (Publish Spans)"| CoreInfra
-    NextWeb -->|"2. REST / HTTPS (Query Analytics & Traces)"| CoreInfra
-    AdminUser -->|"3. HTTPS (Traefik & Grafana Portals)"| CoreInfra
+    NextWeb -->|"2. REST / HTTPS (Query Analytics and Traces)"| CoreInfra
+    AdminUser -->|"3. HTTPS (Traefik and Grafana Portals)"| CoreInfra
 
     PythonSDK -.->|"Proxy Model Calls"| LLMProviders
     CoreInfra -->|"4. HTTPS Webhooks (Trigger Alerts)"| AlertSinks

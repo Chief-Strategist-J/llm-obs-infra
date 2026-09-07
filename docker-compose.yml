@@ -284,7 +284,13 @@ services:
       - ALLOYDB_DB=${ALLOYDB_DB:-llm_observability}
       - OTEL_SERVICE_NAME=llmobs-alloydb-db
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://llmobs-otel-collector:4318
+    command:
+      - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
     volumes:
+      - ./config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/alloydb/security-audit.sql:/docker-entrypoint-initdb.d/10-security-audit.sql:ro
       - alloydb_data:/var/lib/postgresql/data
     networks:
       - llmobs-network
