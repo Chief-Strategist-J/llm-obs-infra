@@ -374,23 +374,21 @@ graph TD
         P2["Producer Client Process 2"]
     end
 
-    subgraph KafkaClusterBoundary ["Kafka Broker Cluster Boundary"]
-        subgraph BrokerCore ["llmobs-kafka Broker Process - cgroup 2048M Limit"]
-            NetListener["Network Socket Listener (Port 9092)"]
-            JVMHeap["JVM Heap (-Xmx1024M)"]
-            PageCache["Linux OS Page Cache"]
-            LogStorage["Partition Log Segments (/var/lib/kafka/data)"]
-        end
+    subgraph BrokerCore ["llmobs-kafka Broker Process - cgroup 2048M Limit"]
+        NetListener["Network Socket Listener (Port 9092)"]
+        JVMHeap["JVM Heap (-Xmx1024M)"]
+        PageCache["Linux OS Page Cache"]
+        LogStorage["Partition Log Segments - /var/lib/kafka/data"]
+    end
 
-        subgraph KRaftQuorum ["KRaft Controller Quorum"]
-            KRaftEngine["KRaft Metadata Engine (@metadata)"]
-        end
+    subgraph KRaftQuorum ["KRaft Controller Quorum"]
+        KRaftEngine["KRaft Metadata Engine - @metadata"]
     end
 
     subgraph KafkaConsumerCluster ["Kafka Consumer Layer"]
         C1["Consumer Thread 1 (Worker)"]
         C2["Consumer Thread 2 (Worker)"]
-        Coord["Broker Group Coordinator (__consumer_offsets)"]
+        Coord["Broker Group Coordinator - __consumer_offsets"]
     end
 
     P1 -->|Produce Batches| NetListener
@@ -1323,30 +1321,28 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph PartitionDirectoryEngine ["Partition Engine - /var/lib/kafka/data/llmobs-spans-0/"]
-        WriteOp["Produce Record Appended"] --> ActiveSegment["Active Segment: 00000000000000000200.log (Currently Appending Write)"]
-
+    subgraph PartitionDirectoryEngine ["Partition Storage Engine - /var/lib/kafka/data/llmobs-spans-0/"]
+        WriteOp["Produce Record Appended"] --> ActiveSegment["Active Segment: 00000000000000000200.log"]
         ActiveSegment --> RollCondition{"Segment Full 100MB or Time Expired 2h?"}
         RollCondition -->|Yes| CloseSegment["Close Active Segment - Mark INACTIVE"]
         CloseSegment --> OpenNew["Open New Active Segment (.log)"]
         RollCondition -->|No| KeepWriting["Continue Appending Writes"]
-
-        subgraph IndexLookups ["Offset and Time Index Files"]
-            OffsetIndex["00000000000000000000.index (Maps Offset to Physical Byte Position)"]
-            TimeIndex["00000000000000000000.timeindex (Maps Timestamp to Offset)"]
-        end
-
-        CloseSegment --> OffsetIndex
-        CloseSegment --> TimeIndex
-
-        subgraph LogRetentionCleaner ["Log Retention Cleaner Thread"]
-            CleanerScan["Retention Scan (Every 60 Seconds)"] --> RetentionCheck{"Closed Segment Age Exceeds 24 Hours?"}
-            RetentionCheck -->|Yes| UnlinkFile["Unlink and Delete Segment Files"]
-            RetentionCheck -->|No| RetainSegment["Retain File on Disk"]
-        end
-
-        CloseSegment --> CleanerScan
     end
+
+    subgraph IndexLookups ["Offset and Time Index Files"]
+        OffsetIndex["00000000000000000000.index - Maps Offset to Byte Position"]
+        TimeIndex["00000000000000000000.timeindex - Maps Timestamp to Offset"]
+    end
+
+    subgraph LogRetentionCleaner ["Log Retention Cleaner Thread"]
+        CleanerScan["Retention Scan (Every 60 Seconds)"] --> RetentionCheck{"Closed Segment Age Exceeds 24 Hours?"}
+        RetentionCheck -->|Yes| UnlinkFile["Unlink and Delete Segment Files"]
+        RetentionCheck -->|No| RetainSegment["Retain File on Disk"]
+    end
+
+    CloseSegment --> OffsetIndex
+    CloseSegment --> TimeIndex
+    CloseSegment --> CleanerScan
 
     style WriteOp fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
     style ActiveSegment fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
@@ -1845,14 +1841,14 @@ graph TB
         Controller1["Broker 1 (Active Controller Leader)"] -->|Publish Metadata Record| MetadataLog["@metadata Partition Log"]
         MetadataLog -->|Replicate Metadata Record| Controller2["Broker 2 (Controller Follower)"]
         MetadataLog -->|Replicate Metadata Record| Controller3["Broker 3 (Controller Follower)"]
+    end
 
-        subgraph PartitionReplication ["Data Partition Leader & ISR Sync"]
-            P_Leader["Partition 0 Leader (Broker 1)"] -->|Fetch Replica Request| P_Follower2["Partition 0 Replica (Broker 2)"]
-            P_Leader -->|Fetch Replica Request| P_Follower3["Partition 0 Replica (Broker 3)"]
-            P_Follower2 -->|Update LEO in Leader| ISR_Quorum["In-Sync Replicas (ISR Pool)"]
-            P_Follower3 -->|Update LEO in Leader| ISR_Quorum
-            ISR_Quorum --> AdvanceHW["Advance High Watermark (HW)"]
-        end
+    subgraph PartitionReplication ["Data Partition Leader & ISR Sync"]
+        P_Leader["Partition 0 Leader (Broker 1)"] -->|Fetch Replica Request| P_Follower2["Partition 0 Replica (Broker 2)"]
+        P_Leader -->|Fetch Replica Request| P_Follower3["Partition 0 Replica (Broker 3)"]
+        P_Follower2 -->|Update LEO in Leader| ISR_Quorum["In-Sync Replicas (ISR Pool)"]
+        P_Follower3 -->|Update LEO in Leader| ISR_Quorum
+        ISR_Quorum --> AdvanceHW["Advance High Watermark (HW)"]
     end
 
     style Controller1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
