@@ -58,6 +58,7 @@ graph TD
 
     Conf --> Conf1["Kafka Configuration Guide"]:::conf
     Conf --> Conf2["ClickHouse Configuration Guide"]:::conf
+    Conf --> Conf3["AlloyDB Omni Configuration Guide"]:::conf
     Conf --> Conf3["OTel Collector Configuration Guide"]:::conf
 ```
 
@@ -124,6 +125,7 @@ set, its trade-off, and its measured impact.
 | [kafka-configuration-guide.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/configDoc/kafka-configuration-guide.md) | Broker, producer, consumer & topic architecture with JVM heap, retention, and segment tuning rationale. | Backend, DevOps & Platform Engineers |
 | [clickhouse-configuration-guide.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/configDoc/clickhouse-configuration-guide.md) | Memory & cache ceilings, query admission control, per-query governance, and system-log retention — validated on ClickHouse 26.8.2.7 under the 4096M cgroup. | Database Administrators, SREs & DevOps |
 | [otel-collector-configuration-guide.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/configDoc/otel-collector-configuration-guide.md) | OpenTelemetry Collector pipeline, memory limiter (800M/160M), GOMEMLIMIT, OTTL PII redaction, batching & Tempo gRPC routing under 1024M cgroup. | Observability Engineers, SREs & DevOps |
+| [alloydb-configuration-guide.md](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/configDoc/alloydb-configuration-guide.md) | Config activation, memory ceilings sized to the cgroup, connection budgeting and the AlloyDB engine extensions - validated on AlloyDB Omni 15 (PostgreSQL 15.17) under the 2048M cgroup. | Database Administrators, SREs & DevOps |
 
 ---
 
