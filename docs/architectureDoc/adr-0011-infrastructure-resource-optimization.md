@@ -3,11 +3,12 @@
 | Field | Value |
 |---|---|
 | **Document ID** | ADR-0011 |
-| **Status** | Proposed |
+| **Status** | **Partially Implemented** — 5 of 10 delivered, 1 ineffective, 4 pending (see §6) |
 | **Author(s)** | Principal Infrastructure Architect |
 | **Target Repository** | `Chief-Strategist-J/llm-obs-infra` |
 | **Date** | 2026-09-07 |
-| **Version** | 1.0.0 |
+| **Version** | 1.1.0 |
+| **Last Audited** | 2026-09-08, against the working tree |
 
 ---
 
@@ -327,24 +328,119 @@ A 4 GB Docker container is already an aggressive constraint for ClickHouse on a 
 
 ---
 
-## 6. Compliance Checklist
+## 6. Implementation Status
 
-| # | Change | File(s) Affected | Status |
+> Audited against the working tree on 2026-09-08. Every status below was verified by reading the
+> actual file, not by trusting this checklist. Where a decision was implemented differently from
+> what was proposed, the difference and its reason are stated.
+
+### 6.1 Scorecard
+
+| Category | Count |
+|---|---|
+| ✅ **Delivered** (of the 10 original decisions) | **5** |
+| ⚠️ **Written but ineffective** | **1** |
+| ⬜ **Pending** | **4** |
+| ➕ **Delivered beyond original scope** (found while implementing) | **12** |
+
+### 6.2 Delivered
+
+| # | Decision | Verified state | Notes |
 |---|---|---|---|
-| 1 | Fix `KAFKA_JVM_PERFORMANCE_OPTS` → `KAFKA_HEAP_OPTS` | `docker-compose.yml` | ⬜ Pending |
-| 2 | Add ClickHouse `mark_cache_size=512MiB` | `config/clickhouse/config.d/custom.xml` | ✅ Superseded by ADR-0012 |
-| 3 | Fix OTel Collector container limit + `limit_mib` ratio | `docker-compose.yml`, `config/otel-collector/otel-collector-config.yaml` | ✅ Implemented (see [ADR-0013](adr-0013-otel-collector-configuration.md)) |
-| 4 | Add Docker limits to Temporal, Tempo, Grafana, Traefik, Registry | `docker-compose.yml` | ⬜ Pending |
-| 5 | Add Redis Docker container limit (512M) | `docker-compose.yml` | ⬜ Pending |
-| 6 | Explicit Redis AOF settings + `maxmemory-clients` | `config/redis/redis.conf` | ⬜ Pending |
-| 7 | Kafka log retention + segment size tuning | `config/kafka/server.properties` | ⬜ Pending |
-| 8 | ClickHouse concurrency limits (do **not** create `dev-limits.xml`) | `config/clickhouse/config.d/custom.xml`, `config/clickhouse/users.d/override.xml` | ✅ Superseded by ADR-0012 |
-| 9 | AlloyDB `max_connections=60`, `work_mem=8MB` | `config/alloydb/postgresql.conf` | ⬜ Pending |
-| 10 | Docker log caps: `default 50m→10m`, `audit 100m→20m` | `docker-compose.yml` | ⬜ Pending |
+| 1 | Kafka `KAFKA_HEAP_OPTS` | `docker-compose.yml:115`, `docker-compose.prod.yml:12` | Done. The *reason* stated in Decision 1 is wrong — see §7 |
+| 2 | ClickHouse `mark_cache_size` | `config.d/custom.xml:57` = `536870912` | Superseded and expanded by [ADR-0012](adr-0012-clickhouse-configuration.md) |
+| 3 | OTel Collector `limit_mib` + container limit | `otel-collector-config.yaml`, `docker-compose.yml` | Delivered under [ADR-0013](adr-0013-otel-collector-configuration.md) |
+| 8 | ClickHouse concurrency + per-query caps | `config.d/custom.xml:37`, `users.d/override.xml` | Superseded by ADR-0012. `dev-limits.xml` deliberately **not** created |
+| 9 | AlloyDB `max_connections` / `work_mem` | `postgresql.conf:53,84` | **Revised:** `max_connections = 80`, not the proposed 60. AlloyDB sets `superuser_reserved_connections = 30`, so 60 would have left a non-superuser role exactly Temporal's 30 with zero headroom |
+
+### 6.3 Written but ineffective
+
+| # | Decision | Why it does nothing |
+|---|---|---|
+| 7 | Kafka log retention and segment tuning | The five settings exist in `config/kafka/server.properties:15-19`, but that file is mounted at `/etc/kafka/server.properties` while the `apache/kafka` image reads `/etc/kafka/docker/server.properties` and generates it from `KAFKA_*` environment variables. **No `KAFKA_LOG_*` env vars are set.** This repository's own remediation plan already states "the environment variables are authoritative for this image". The retention tuning is therefore inert — the broker still runs 7-day retention with 1 GB segments |
+
+**Fix:** move the five values to `KAFKA_LOG_RETENTION_HOURS`, `KAFKA_LOG_SEGMENT_BYTES`, `KAFKA_LOG_ROLL_HOURS`, `KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS` and `KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS` in `docker-compose.yml`. Note that `offsets.topic.num.partitions` has no effect once `__consumer_offsets` exists in the `kafka_data` volume.
+
+This is the same class of defect as AlloyDB's unmounted `postgresql.conf` (§6.5): a tracked, documented configuration file that nothing reads.
+
+### 6.4 Pending
+
+| # | Decision | Current state | Impact |
+|---|---|---|---|
+| 4 | Memory limits on Temporal, Tempo, Grafana, Traefik, Service Registry | **All five still unbounded** | Any one can still OOM the host. This was the single largest item in the ADR |
+| 5 | Redis container memory limit | No `deploy.resources` block on `llmobs-redis` | `maxmemory 256mb` bounds the dataset but not the AOF-rewrite fork spike |
+| 6 | Redis explicit AOF settings + `maxmemory-clients` | `redis.conf` has only `maxmemory` and `maxmemory-policy` | Defaults apply and are unpinned across version upgrades |
+| 10 | Docker log caps `50m→10m`, `100m→20m` | Still `50m` x `3` and `100m` x `10` | Theoretical ceiling remains ~2.35 GB |
+
+### 6.5 Delivered beyond the original scope
+
+Found while implementing the above. None were identified in this ADR.
+
+| # | Finding | Service | Where recorded |
+|---|---|---|---|
+| A1 | `postgresql.conf` **mounted nowhere** — the entire AlloyDB config was inert, including everything Decision 9 proposed | AlloyDB | Guide §1.1 item 1 |
+| A2 | `shared_buffers` auto-sized from **host RAM**: 12 GB inside a 2 GiB cgroup; idle RSS 85% → 32% | AlloyDB | Guide §1.1 item 3 |
+| A3 | `effective_cache_size` inherited a host-derived 4 GB, distorting every plan | AlloyDB | Guide §1.1 item 4 |
+| A4 | Columnar engine reserves 1 GiB — half the container — on enable; capped to 256MB | AlloyDB | Guide §1.1 item 8 |
+| A5 | `superuser_reserved_connections = 30`, not PostgreSQL's 3 | AlloyDB | Guide §1.1 item 14 |
+| A6 | `security-audit.sql` mounted nowhere; `security_audit_logs` existed in no database (audit **H-01**) | AlloyDB | Guide §1.1 item 10 |
+| A7 | WAL archiving implemented and a **PITR restore drill executed** — previously losing the volume lost everything | AlloyDB | Guide §8 |
+| A8 | Archive volume created root-owned: `archive_command` failed 14 times, 0 archived — WAL would have filled the disk | AlloyDB | Guide §8.2 |
+| C1 | `uncompressed_cache_size` shipped at 2 GiB — half the container — and unmentioned by Decision 2 | ClickHouse | ADR-0012 §7.2 |
+| C2 | In-container file log unbounded at ~10 GB, not covered by the compose logging block | ClickHouse | ADR-0012 C-7 |
+| C3 | System log tables had no TTL and grew forever — the actual "disk bloat" this ADR asserted | ClickHouse | ADR-0012 C-8 |
+| C4 | `<ttl>` beside `<engine>` makes ClickHouse **refuse to start**; the config as proposed would not have booted | ClickHouse | ADR-0012 §3.1 |
+
+Also added, not in scope here: statement/idle/lock timeouts, `pg_stat_statements`, transaction-ID wraparound tracking and CPU limits on AlloyDB.
+
+### 6.6 Cross-cutting gaps this work surfaced
+
+Not attributable to any single decision, and each needs its own decision record:
+
+1. **No metrics pipeline or backend exists anywhere in the stack.** The OTel Collector declares a traces pipeline only. Every metric the configuration guides tell an operator to check is hand-only. Affects AlloyDB, ClickHouse and Kafka equally.
+2. **AlloyDB is a single point of failure** for all Temporal workflow state — no standby, no promotion procedure.
+3. **Block I/O is unbounded for every service**, on a host at 72% disk usage.
+4. **No `docker-compose.prod.yml` override for AlloyDB**, so production would inherit the 2 GiB development floor. ClickHouse's prod override is also capped at 3.5 GiB by a hardcoded `max_server_memory_usage`, leaving ~4.5 GiB unusable.
 
 ---
 
-## 7. References
+## 7. Corrections to This ADR
+
+Recorded rather than silently edited, so the reasoning trail stays intact. Each was verified against
+the running software.
+
+| Location | Claim | Correction |
+|---|---|---|
+| §1 | "3 services whose memory limits were set incorrectly … (they are correct as-is)" | Self-contradictory. It means three *proposed reductions* were rejected; the limits were never wrong |
+| §2.2 | "Five services have no Docker memory limit" | The table directly above lists **six** — Redis is unbounded too, just handled under Decision 5 |
+| Decision 1 | "The two variables are concatenated — not merged — creating an unpredictable startup state" | The JVM takes the **last** `-Xmx`, so the heap was already 512m/1024m as intended. The real defect is that setting `KAFKA_JVM_PERFORMANCE_OPTS` **overwrites the image's default GC flags** (G1GC and its pause tuning). The rename is still correct, for that reason |
+| Decision 2 | "ClickHouse silently over-allocates marks beyond the cgroup, relying on the Linux page cache as an overflow buffer" | The mark cache is a bounded LRU that evicts at its ceiling. The defect is that its *ceiling* (5 GiB) was set above its *enclosure* (4 GiB), so it grows past the cgroup before evicting. Remediation unchanged |
+| Decision 3 | "the container can grow to 1.5 GB … without the limiter ever activating" | Contradicts the preceding sentence. The limiter **does** fire, at 512 MiB — far too early. That was the problem |
+| Decision 6 | "`__consumer_offsets` … creates up to 50 open 1 GB reservation files per topic" | Kafka does not preallocate segments (`log.preallocate` defaults to false). Only sparse `.index` files are preallocated. And `__consumer_offsets` is one topic, not one per topic |
+| §5 | "Docker log disk ceiling reduced … to ~340 MB" | 9 containers x 30 MB + 100 MB = **370 MB** |
+| §5 | "All 10 services now have Docker memory ceilings" | Aspirational. Five still have none — see §6.4 |
+| Throughout | Container-limit arithmetic | The sum of all proposed limits is **12,672 MB ≈ 12.4 GiB** on a 15 GB host with ~7 GB free. Docker limits bound individual containers, not their sum; the stack remains oversubscribed. This ADR never performed that check |
+
+---
+
+## 8. Original Compliance Checklist (superseded by §6)
+
+| # | Change | File(s) Affected | Status |
+|---|---|---|---|
+| 1 | Fix `KAFKA_JVM_PERFORMANCE_OPTS` → `KAFKA_HEAP_OPTS` | `docker-compose.yml` | ✅ Done |
+| 2 | Add ClickHouse `mark_cache_size=512MiB` | `config/clickhouse/config.d/custom.xml` | ✅ Superseded by ADR-0012 |
+| 3 | Fix OTel Collector container limit + `limit_mib` ratio | `docker-compose.yml`, `config/otel-collector/otel-collector-config.yaml` | ✅ Implemented (see [ADR-0013](adr-0013-otel-collector-configuration.md)) |
+| 4 | Add Docker limits to Temporal, Tempo, Grafana, Traefik, Registry | `docker-compose.yml` | ⬜ **Pending** — all five still unbounded |
+| 5 | Add Redis Docker container limit (512M) | `docker-compose.yml` | ⬜ **Pending** |
+| 6 | Explicit Redis AOF settings + `maxmemory-clients` | `config/redis/redis.conf` | ⬜ **Pending** |
+| 7 | Kafka log retention + segment size tuning | `config/kafka/server.properties` | ⚠️ **Written but ineffective** — see §6.3 |
+| 8 | ClickHouse concurrency limits (do **not** create `dev-limits.xml`) | `config/clickhouse/config.d/custom.xml`, `config/clickhouse/users.d/override.xml` | ✅ Superseded by ADR-0012 |
+| 9 | AlloyDB `max_connections=60`, `work_mem=8MB` | `config/alloydb/postgresql.conf` | ✅ Done, revised to `80` — see §6.2 |
+| 10 | Docker log caps: `default 50m→10m`, `audit 100m→20m` | `docker-compose.yml` | ⬜ **Pending** |
+
+---
+
+## 9. References
 
 | Document | URL |
 |---|---|
