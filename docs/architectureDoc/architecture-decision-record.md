@@ -31,6 +31,7 @@ This document provides the consolidated index of key Architectural Decision Reco
 | [ADR-0010](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/architectureDoc/adr-0010-dev-stable-automated-failover.md) | Active-Passive Zero-Downtime Failover (Dev vs. Stable) | Accepted | Deploy priority-based Traefik health probing for automated active-passive failover from dev services to pre-built stable images. |
 | [ADR-0016](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0016-kubernetes-migration-and-cicd-pipeline-architecture.md) | Kubernetes Migration Manifests & CI/CD Pipeline Architecture | Accepted | Deploy declarative K8s manifests for 8 core services and 5 modular GitHub Actions CI/CD workflows. |
 | [ADR-0017](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0017-canary-deployment-strategy-and-progressive-delivery.md) | Canary Deployment Strategy & Progressive Delivery Architecture | Accepted | Deploy Argo Rollouts progressive delivery controller with dual-service traffic splitting, 4-stage rollout, and automated Prometheus circuit breakers. |
+| [ADR-0018](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0018-continuous-integration-and-delivery-pipeline-architecture.md) | Continuous Integration & Continuous Delivery (CI/CD) Pipeline Architecture | Accepted | Establish 5 modular GitHub Actions pipelines with three-tier validation cascade, Docker Buildx SBOM/provenance, and least-privilege OIDC tokens. |
 
 ---
 
