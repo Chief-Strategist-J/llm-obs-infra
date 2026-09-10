@@ -134,7 +134,7 @@ graph TD
     GHActions -->|kubectl argo rollouts set image| ArgoController
     ArgoController -->|Adjust Replicas & Labels| StableReplicaSet
     ArgoController -->|Adjust Replicas & Labels| CanaryReplicaSet
-    ArgoController -->|Update Weight (5% -> 25% -> 50%)| TrafficSplit
+    ArgoController -->|Update Weight: 5% to 25% to 50%| TrafficSplit
 
     Prometheus -->|Scrape /metrics| CanaryReplicaSet
     Prometheus -->|Scrape /metrics| StableReplicaSet
