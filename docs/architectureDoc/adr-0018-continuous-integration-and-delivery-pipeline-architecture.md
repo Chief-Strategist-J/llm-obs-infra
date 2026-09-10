@@ -85,24 +85,60 @@ Every pipeline implements `on: workflow_dispatch` with formal parameter typing (
 
 To maximize pipeline speed and provide instant diagnostic feedback, validation pipelines implement a three-tier execution cascade:
 
+```mermaid
+flowchart TD
+    subgraph Tier1 ["TIER 1: Lexical & Syntax Verification (Duration: Under 5s)"]
+        T1_A["bash -n (Shell Script Syntax Validation)"]
+        T1_B["python yaml.safe_load_all (Multi-Document YAML Parsing)"]
+        T1_C["docker compose config --quiet (Compose Spec Syntax)"]
+    end
+
+    subgraph Tier2 ["TIER 2: Static Analysis & Schema Conformance (Duration: 10 to 20s)"]
+        T2_A["shellcheck --severity=error (Shell Static Bug Analysis)"]
+        T2_B["kubeconform --strict (Kubernetes 1.31 OpenAPI Schema Validation)"]
+    end
+
+    subgraph Tier3 ["TIER 3: Behavioral Dry-Run Execution (Duration: 15 to 30s)"]
+        T3_A["kubectl apply --dry-run=client (Client Decoding & API Verification)"]
+    end
+
+    subgraph ReportingPlane ["REPORTING: GitHub Step Summary"]
+        StepSummary["Formatted Markdown Summary Table ($GITHUB_STEP_SUMMARY)"]
+    end
+
+    StartEvent["Trigger: Code Push / Workflow Dispatch"] --> Tier1
+
+    T1_A -->|Pass| Tier2
+    T1_B -->|Pass| Tier2
+    T1_C -->|Pass| Tier2
+
+    T2_A -->|Pass| Tier3
+    T2_B -->|Pass| Tier3
+
+    T3_A -->|Pass| StepSummary
+
+    T1_A -.->|Fail: Syntax Error| TerminateFail["Fail Fast: Terminate Job & Emit Line Annotation"]
+    T1_B -.->|Fail: Parse Error| TerminateFail
+    T1_C -.->|Fail: Compose Syntax Error| TerminateFail
+    T2_A -.->|Fail: ShellCheck Error| TerminateFail
+    T2_B -.->|Fail: Schema Defect| TerminateFail
+    T3_A -.->|Fail: Dry-Run Rejection| TerminateFail
+
+    style StartEvent fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Tier1 fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Tier2 fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Tier3 fill:#311042,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style ReportingPlane fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style StepSummary fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style TerminateFail fill:#881337,stroke:#f43f5e,stroke-width:2px,color:#f8fafc
 ```
-TIER 1: Lexical & Syntax Verification (< 5 Seconds)
-  ├── bash -n (Shell syntax verification)
-  ├── python yaml.safe_load_all (YAML syntax parsing)
-  └── docker compose config --quiet (Compose file parsing)
-          │
-          ▼ [PASS]
-TIER 2: Static Analysis & Schema Conformance (10–20 Seconds)
-  ├── shellcheck --severity=error (Static shell bug detection)
-  └── kubeconform --strict --kubernetes-version 1.31.0 (Official K8s OpenAPI schema conformance)
-          │
-          ▼ [PASS]
-TIER 3: Behavioral Dry-Run Execution (15–30 Seconds)
-  └── kubectl --dry-run=client (Server schema validation without cluster modification)
-          │
-          ▼ [PASS]
-REPORTING: GitHub Step Summary Table (Instant UI Visibility)
-```
+
+| Validation Tier | Scope & Tooling | Execution Target | Maximum Duration | Failure Action |
+|---|---|---|---|---|
+| **Tier 1: Lexical & Syntax** | `bash -n`, `python yaml.safe_load_all`, `docker compose config --quiet` | All `.sh` scripts, `.yaml` manifests, Compose files | < 5 seconds | Fail fast immediately. Terminates runner execution without running subsequent tiers. |
+| **Tier 2: Static Analysis & Schema** | `shellcheck --severity=error`, `kubeconform --strict` | POSIX compliance, K8s OpenAPI v1.31 schemas | 10–20 seconds | Fail fast immediately. Emits `::error::` GitHub line annotations with exact code/column pointers. |
+| **Tier 3: Behavioral Dry-Run** | `kubectl apply --dry-run=client -f <file>` | Client-side API resource decoders | 15–30 seconds | Fail fast immediately. Detects unknown API fields and deprecated API versions. |
+| **Reporting: Step Summary** | Bash markdown aggregation to `$GITHUB_STEP_SUMMARY` | Entire validation suite | < 2 seconds | Publishes unified status matrix table to the GitHub Actions workflow UI. |
 
 If Tier 1 fails, the pipeline terminates immediately without wasting compute resources on deeper schema or dry-run checks.
 
@@ -380,9 +416,295 @@ Docker Compose profiles allow modular infrastructure execution (ADR-0015). The v
 
 ---
 
-## 6. Operational Runbooks: Triggering Workflows via GitHub CLI & Web UI
+## 6. ArgoCD GitOps Integration with Kubernetes & CI/CD
 
-### 6.1 Executing Workflows via GitHub CLI (`gh`)
+### 6.1 GitOps Paradigm & Architectural Overview
+
+The integration of **ArgoCD** establishes the definitive GitOps operational standard for `llm-obs-infra`. In traditional deployment models, CI systems directly authenticate to Kubernetes clusters with administrative privileges (`kubectl apply` pushed from CI), which introduces high security risks (cluster credentials exposed in CI runners) and suffers from configuration drift (manual cluster changes go untracked).
+
+Under this GitOps architecture:
+1. **Git is the Single Source of Truth**: The `k8s/` directory in repository `Chief-Strategist-J/llm-obs-infra` represents the exact desired state of the platform.
+2. **Pull-Based Reconciliation**: ArgoCD runs inside the Kubernetes cluster (namespace `argocd`) and continuously pulls from Git, comparing desired manifests against live cluster resources.
+3. **No Inbound Cluster Access from CI**: GitHub Actions workflows never hold long-lived cluster admin credentials. CI pipelines validate code, build container images, and publish to registries. ArgoCD detects manifest updates in Git and reconciles them inside the cluster firewall.
+
+The internal topology consists of four discrete ArgoCD subsystems:
+- **`argocd-server`**: API and web dashboard interface providing RBAC, SSO, and audit logging.
+- **`argocd-repo-server`**: Internal service that clones Git repositories and generates raw Kubernetes manifests.
+- **`argocd-application-controller`**: The continuous reconciliation engine that queries `kube-apiserver`, computes 3-way resource diffs, and orchestrates sync waves.
+- **`argocd-redis`**: High-performance in-memory cache storing repository manifests and cluster state diffs.
+
+---
+
+### 6.2 High-Level Design (HLD) — ArgoCD GitOps & Kubernetes Integration Architecture
+
+```mermaid
+graph TD
+    subgraph GitSourcePlane ["GitOps Source-of-Truth Plane (GitHub)"]
+        GitRepo["GitHub Repository (Chief-Strategist-J/llm-obs-infra)"]
+        K8sManifests["k8s/ Manifests Directory"]
+        GitWebhook["GitHub Webhook / 3-Minute Commit Poller"]
+    end
+
+    subgraph CIBuildPlane ["CI Pipeline Execution (GitHub Actions)"]
+        GHA_Build["docker-image-build.yml"]
+        GHCR_Registry["GitHub Container Registry (ghcr.io)"]
+    end
+
+    subgraph ArgoCDControlPlane ["ArgoCD GitOps Control Plane (Namespace: argocd)"]
+        ArgoServer["argocd-server (API & Web Dashboard)"]
+        RepoServer["argocd-repo-server (Manifest Generator & Cloner)"]
+        AppController["argocd-application-controller (Reconciliation Loop)"]
+        ArgoRedis["argocd-redis (State & Diff Cache)"]
+    end
+
+    subgraph KubernetesClusterPlane ["Target Kubernetes Cluster (Namespace: llmobs)"]
+        KubeAPI["kube-apiserver (Control Plane API)"]
+        etcdStorage["etcd (Cluster State Store)"]
+
+        subgraph SyncWaveOrder ["Deterministic Sync Wave Progression"]
+            Wave0["Wave 0: namespace.yaml"]
+            Wave1["Wave 1: configmap.yaml & secrets.yaml"]
+            Wave2["Wave 2: persistent-volume-claims.yaml"]
+            Wave3["Wave 3: Stateful Deployments (AlloyDB, ClickHouse, Kafka)"]
+            Wave4["Wave 4: Stateless Workloads (OTel, Grafana, Temporal)"]
+            Wave5["Wave 5: Canary Rollouts (canary-deployment-rollout.yaml)"]
+        end
+    end
+
+    subgraph DynamicCanaryPlane ["Dynamic Progressive Delivery Plane"]
+        RolloutController["Argo Rollouts Controller"]
+        PrometheusMetrics["Prometheus Metrics Server"]
+    end
+
+    GitRepo --> K8sManifests
+    K8sManifests --> GitWebhook
+
+    GHA_Build -->|Build and Attest| GHCR_Registry
+    GHA_Build -->|Commit Image Tag| GitRepo
+
+    GitWebhook -->|Sync Notification| RepoServer
+    RepoServer -->|Fetch Desired State| GitRepo
+    RepoServer -->|Generate Raw Manifests| AppController
+    AppController <--> ArgoRedis
+
+    AppController -->|Query Live Cluster State| KubeAPI
+    KubeAPI <--> etcdStorage
+
+    AppController -->|Reconcile Drift and Apply Waves| KubeAPI
+
+    KubeAPI --> Wave0
+    Wave0 --> Wave1
+    Wave1 --> Wave2
+    Wave2 --> Wave3
+    Wave3 --> Wave4
+    Wave4 --> Wave5
+
+    Wave5 --> RolloutController
+    RolloutController -->|Evaluate Metric Health| PrometheusMetrics
+
+    style GitRepo fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style K8sManifests fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style GitWebhook fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style GHA_Build fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style GHCR_Registry fill:#4c1d95,stroke:#c084fc,stroke-width:2px,color:#f8fafc
+    style ArgoServer fill:#701a75,stroke:#f472b6,stroke-width:2px,color:#f8fafc
+    style RepoServer fill:#701a75,stroke:#f472b6,stroke-width:2px,color:#f8fafc
+    style AppController fill:#701a75,stroke:#f472b6,stroke-width:2px,color:#f8fafc
+    style ArgoRedis fill:#701a75,stroke:#f472b6,stroke-width:2px,color:#f8fafc
+    style KubeAPI fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style etcdStorage fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style Wave0 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Wave1 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Wave2 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Wave3 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Wave4 fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+    style Wave5 fill:#701a75,stroke:#f472b6,stroke-width:2px,color:#f8fafc
+    style RolloutController fill:#701a75,stroke:#f472b6,stroke-width:2px,color:#f8fafc
+    style PrometheusMetrics fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#f8fafc
+```
+
+---
+
+### 6.3 Low-Level Design (LLD) — End-to-End GitOps Sync & Reconciliation Sequence
+
+The sequence diagram below specifies the end-to-end execution flow from git commit through ArgoCD reconciliation to progressive rollout handoff:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer / Release Engineer
+    participant Git as GitHub Repository (Chief-Strategist-J/llm-obs-infra)
+    participant CI as GitHub Actions CI Plane (.github/workflows)
+    participant Registry as Container Registry (ghcr.io)
+    participant ArgoRepo as ArgoCD Repo Server
+    participant ArgoApp as ArgoCD Application Controller
+    participant KubeAPI as Kubernetes API Server (Control Plane)
+    participant Kubelet as Worker Node Kubelet
+    participant Rollout as Argo Rollouts Controller
+
+    Dev->>Git: Push Commit or Release Tag (k8s/ manifest update)
+    Git->>CI: Trigger Three-Tier Validation (Syntax -> Schema -> Dry-Run)
+    CI-->>Git: Validation Checks Succeeded (Green Status)
+
+    opt When Building New Container Image
+        CI->>Registry: Buildx Compile, SBOM Attest, and Push Image Tag
+        CI->>Git: Commit Updated Image Tag to k8s/rollouts or Deployment
+    end
+
+    Note over Git,ArgoRepo: GitOps Detection Phase (Webhook or 3m Polling)
+    Git->>ArgoRepo: Webhook Event: Commit SHA pushed to main
+    ArgoRepo->>Git: git pull origin main (Fetch k8s/ directory)
+    ArgoRepo-->>ArgoApp: Synthesize Manifests (Raw YAML & ConfigMaps)
+
+    Note over ArgoApp,KubeAPI: State Comparison & Drift Evaluation
+    ArgoApp->>KubeAPI: Query Live Cluster Resources in namespace llmobs
+    KubeAPI-->>ArgoApp: Return Current Live Resource State
+    ArgoApp->>ArgoApp: Compute 3-Way Diff (Git Desired vs Cluster Live)
+
+    alt Cluster is In-Sync
+        ArgoApp-->>ArgoApp: Mark Application Status: Synced and Healthy
+    else Drift Detected (OutOfSync)
+        Note over ArgoApp,KubeAPI: Automated Sync Wave Reconciliation
+        ArgoApp->>KubeAPI: Wave 0: Apply namespace.yaml
+        ArgoApp->>KubeAPI: Wave 1: Apply configmap.yaml and secrets.yaml
+        ArgoApp->>KubeAPI: Wave 2: Apply persistent-volume-claims.yaml
+        ArgoApp->>KubeAPI: Wave 3: Apply Database Deployments (AlloyDB, ClickHouse, Kafka)
+        KubeAPI->>Kubelet: Reconcile Storage and Pods
+        Kubelet-->>KubeAPI: Pods Running and Probes Passing (HTTP 200)
+        ArgoApp->>KubeAPI: Wave 4: Apply Ingestion Collectors and UI (OTel, Grafana)
+        ArgoApp->>KubeAPI: Wave 5: Apply Canary Rollouts (canary-deployment-rollout.yaml)
+        
+        Note over KubeAPI,Rollout: Progressive Delivery Handoff
+        KubeAPI->>Rollout: Reconcile Rollout Spec Modification
+        Rollout->>Rollout: Execute Phased Canary (5% to 25% to 50% to 100%)
+        ArgoApp-->>ArgoApp: Mark Application Status: Synced
+    end
+```
+
+---
+
+### 6.4 Sync Waves & Resource Ordering (`argocd.argoproj.io/sync-wave`)
+
+A critical risk in Kubernetes deployments is resource race conditions—for example, if a Temporal pod boots before AlloyDB has provisioned its PVC and started listening on port 5432, Temporal will crash loop.
+
+ArgoCD **Sync Waves** eliminate this by enforcing deterministic step-by-step ordering. ArgoCD will NOT proceed to Wave N+1 until all resources in Wave N are in `Healthy` status:
+
+| Sync Wave | Target Manifests | Resource Kinds | Health Criteria to Advance |
+|---|---|---|---|
+| **Wave 0** | `k8s/namespace.yaml` | `Namespace` | Namespace exists and is active. |
+| **Wave 1** | `k8s/configmap.yaml`, `k8s/secrets.yaml` | `ConfigMap`, `Secret` | Resources created in API server. |
+| **Wave 2** | `k8s/persistent-volume-claims.yaml` | `PersistentVolumeClaim` (x6) | PVC status transitions to `Bound`. |
+| **Wave 3** | `k8s/deployments/alloydb-*`, `redis-*`, `clickhouse-*`, `kafka-*`, `tempo-*` | `Deployment`, `Service` | Database pods passing readiness probes (`pg_isready`, `redis-cli ping`, HTTP `/ping`). |
+| **Wave 4** | `k8s/deployments/opentelemetry-*`, `grafana-*`, `temporal-*` | `Deployment`, `Service` | Telemetry pipelines and UI portals healthy and connected to databases. |
+| **Wave 5** | `k8s/rollouts/canary-deployment-rollout.yaml` | `Rollout`, `Service` (x2) | Handoff to Argo Rollouts controller for canary traffic progression. |
+
+---
+
+### 6.5 ArgoCD & Argo Rollouts Coexistence (`spec.ignoreDifferences`)
+
+A major architectural challenge arises when running both ArgoCD and Argo Rollouts concurrently:
+- When Argo Rollouts shifts canary traffic (e.g. from 5% to 25%), it dynamically scales the canary ReplicaSet and updates pod labels.
+- If ArgoCD has automated self-healing enabled (`selfHeal: true`), ArgoCD detects this live state modification as "drift" from Git and immediately attempts to revert the replica count back to Git's baseline!
+- This results in a catastrophic reconciliation loop where ArgoCD and Argo Rollouts continuously fight over pod counts.
+
+**The Architectural Solution**: ArgoCD `ignoreDifferences` is configured on the `Rollout` CRD, instructing ArgoCD to ignore dynamic runtime changes to `/spec/replicas` and `/status`:
+
+```yaml
+ignoreDifferences:
+  - group: argoproj.io
+    kind: Rollout
+    jsonPointers:
+      - /spec/replicas
+      - /status
+```
+
+This clean boundary guarantees that ArgoCD manages the declarative template in Git while Argo Rollouts retains full autonomy over dynamic traffic weights and replica counts during active deployments.
+
+---
+
+### 6.6 Declarative ArgoCD `Application` CRD Specification
+
+The platform application is managed declaratively via this root ArgoCD Application manifest:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: llmobs-infrastructure
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Chief-Strategist-J/llm-obs-infra.git
+    targetRevision: main
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: llmobs
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: Rollout
+      jsonPointers:
+        - /spec/replicas
+        - /status
+```
+
+---
+
+### 6.7 Automated Drift Detection & Self-Healing Engine
+
+ArgoCD provides active protection against cluster drift and unauthorized manual edits:
+1. **Continuous Reconciliation Loop**: Every 3 minutes (or instantly upon receiving a GitHub push webhook), `argocd-application-controller` compares Git against the live cluster.
+2. **Self-Healing Enforcement (`selfHeal: true`)**: If an operator manually modifies an environment variable or scales down a deployment via `kubectl edit`, ArgoCD automatically overrides the manual edit within seconds, restoring the cluster to the exact specification committed in Git.
+3. **Automated Resource Pruning (`prune: true`)**: When a deployment or service manifest is deleted from the `k8s/` directory in Git, ArgoCD automatically cleans up and deletes the orphaned resource from the Kubernetes cluster.
+
+---
+
+### 6.8 Operational Runbooks: Managing ArgoCD via CLI and Web UI
+
+Engineers interact with the live GitOps synchronization loop using the `argocd` CLI:
+
+```bash
+# 1. Access the ArgoCD Web Dashboard via port-forward
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+# Open https://localhost:8080 in browser
+
+# 2. Inspect application health and sync status
+argocd app get llmobs-infrastructure
+
+# 3. View live differences between Git and Kubernetes
+argocd app diff llmobs-infrastructure
+
+# 4. Trigger manual immediate synchronization
+argocd app sync llmobs-infrastructure --prune
+
+# 5. Roll back to a previous Git revision history
+argocd app rollback llmobs-infrastructure <history-id>
+```
+
+---
+
+## 7. Operational Runbooks: Triggering Workflows via GitHub CLI & Web UI
+
+### 7.1 Executing Workflows via GitHub CLI (`gh`)
 
 Engineers can trigger any pipeline directly from their terminal using the GitHub CLI:
 
@@ -413,7 +735,7 @@ gh workflow run canary-traffic-rollout.yml \
   -f auto_promote=false
 ```
 
-### 6.2 Monitoring Live Workflow Runs
+### 7.2 Monitoring Live Workflow Runs
 
 ```bash
 # View recent workflow runs across the repository

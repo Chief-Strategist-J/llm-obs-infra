@@ -62,6 +62,21 @@ This document provides the consolidated index of key Architectural Decision Reco
 - **Decision**: Deploy a Go-based dynamic service registry with heartbeat TTL leases, active HTTP/TCP health probing, data-driven load balancer (5 algorithms), per-instance circuit breakers, and Traefik dynamic config exporter.
 - **Consequences**: Eliminates hardcoded endpoints, provides instant failure diagnostics, enables automatic failover, and integrates with existing Traefik gateway for domain-based routing.
 
+### ADR-0016: Kubernetes Migration Manifests & CI/CD Pipeline Architecture
+- **Context**: Single-host Docker Compose stack constrained scale, lacked automated syntax/schema validation, and prevented declarative zero-downtime rollouts.
+- **Decision**: Author production Kubernetes manifests for 8 services mirroring Compose specifications and implement 5 modular GitHub Actions pipelines.
+- **Consequences**: Enables Kubernetes deployment while preserving 100% backward compatibility with existing Docker Compose orchestration.
+
+### ADR-0017: Canary Deployment Strategy & Progressive Delivery Architecture
+- **Context**: Standard RollingUpdate deployments release new binaries to 100% of user traffic immediately as readiness probes pass, risking wide blast radius on runtime defects.
+- **Decision**: Deploy Argo Rollouts controller with dual-service traffic splitting (`llmobs-canary-rollout-stable` and `canary`), 4-stage progression (5% -> 25% -> 50% -> 100%), and automated Prometheus analysis circuit breakers.
+- **Consequences**: Restricts defect blast radius to 5% of traffic and enables sub-5-second automated rollback upon error rate or latency breaches.
+
+### ADR-0018: Continuous Integration & Continuous Delivery (CI/CD) Pipeline Architecture
+- **Context**: Shell scripts, Compose profiles, and Kubernetes manifests lacked automated linting and schema validation, exposing deployments to syntax errors and supply chain tampering.
+- **Decision**: Establish 5 modular GitHub Actions workflows with a three-tier validation cascade, Docker Buildx caching (`type=gha`), SPDX SBOM generation, SLSA provenance attestation, and ArgoCD GitOps integration.
+- **Consequences**: Provides sub-45-second validation feedback, enforces supply chain verification, and enables pull-based GitOps reconciliation without exposing cluster credentials in CI runners.
+
 ---
 
 ## 3. Related Documents
