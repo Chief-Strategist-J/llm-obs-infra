@@ -15,6 +15,7 @@ services:
   llmobs-traefik:
     image: traefik:v3.7
     container_name: llmobs-traefik-gateway
+    profiles: ["network", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
@@ -68,6 +69,7 @@ services:
   llmobs-redis:
     image: redis:7-alpine
     container_name: llmobs-redis-ledger
+    profiles: ["db", "full"]
     restart: unless-stopped
     logging: *default-logging
     command: >
@@ -91,6 +93,7 @@ services:
   llmobs-kafka:
     image: apache/kafka:latest
     container_name: llmobs-kafka-broker
+    profiles: ["streaming", "full"]
     restart: unless-stopped
     logging: *default-logging
     ulimits:
@@ -135,6 +138,7 @@ services:
   llmobs-clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: llmobs-clickhouse-analytics
+    profiles: ["analytics", "full"]
     restart: unless-stopped
     logging: *default-logging
     ulimits:
@@ -173,6 +177,7 @@ services:
   llmobs-tempo:
     image: grafana/tempo:latest
     container_name: llmobs-tempo-tracing
+    profiles: ["tracing", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
@@ -204,6 +209,7 @@ services:
   llmobs-otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: llmobs-otel-collector
+    profiles: ["tracing", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
@@ -233,11 +239,14 @@ services:
       - "traefik.http.services.otel.loadbalancer.server.port=4318"
       - "traefik.http.services.otel.loadbalancer.server.scheme=https"
     depends_on:
-      - llmobs-tempo
+      llmobs-tempo:
+        condition: service_started
+        required: false
 
   llmobs-grafana:
     image: grafana/grafana:latest
     container_name: llmobs-grafana-portal
+    profiles: ["tracing", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
@@ -277,12 +286,17 @@ services:
       - "traefik.http.routers.grafana.middlewares=security-headers@file,rate-limit@file"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
     depends_on:
-      - llmobs-tempo
-      - llmobs-otel-collector
+      llmobs-tempo:
+        condition: service_started
+        required: false
+      llmobs-otel-collector:
+        condition: service_started
+        required: false
 
   llmobs-alloydb:
     image: google/alloydbomni:15
     container_name: llmobs-alloydb-db
+    profiles: ["db", "workflows", "full"]
     restart: unless-stopped
     logging: *audit-logging
     deploy:
@@ -336,6 +350,7 @@ services:
   llmobs-temporal:
     image: temporalio/auto-setup:1.24.2
     container_name: llmobs-temporal-engine
+    profiles: ["workflows", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
@@ -371,6 +386,7 @@ services:
         condition: service_started
       llmobs-otel-collector:
         condition: service_started
+        required: false
     networks:
       - llmobs-network
     healthcheck:
@@ -383,6 +399,7 @@ services:
   llmobs-service-registry:
     image: chiefj/llmobs-service-registry:latest
     container_name: llmobs-service-registry
+    profiles: ["network", "full"]
     restart: always
     logging: *default-logging
     deploy:
@@ -409,7 +426,9 @@ services:
       timeout: 3s
       retries: 5
     depends_on:
-      - llmobs-otel-collector
+      llmobs-otel-collector:
+        condition: service_started
+        required: false
 
 networks:
   llmobs-network:

@@ -34,7 +34,7 @@ check_container_status() {
   TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
 
   if ! docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
-    echo -e "  ${RED}[FAIL]${NC} ${BOLD}${service_label}${NC} (${container_name}) -> Container is NOT running"
+    echo -e "  ${YELLOW}[SKIP]${NC} ${BOLD}${service_label}${NC} (${container_name}) -> Container is not running (unselected profile)"
     return 0
   fi
 

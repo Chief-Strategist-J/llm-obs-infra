@@ -11,7 +11,7 @@ CURRENT_SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$CURRENT_SCRIPT_DIR/discovery/dynamic-discovery.sh"
 
 get_stack_ports() {
-  echo "31410 31411 31412 31413 31414 31415 31416 31417 31418 31419 31420 31421 31422 31423 31424 31425"
+  echo "31410 31411 31412 31413 31414 31415 31416 31417 31418 31419 31420 31421 31422 31423 31424 31425 31426"
 }
 
 get_docker_compose_cmd() {
@@ -51,6 +51,8 @@ execute_up_pipeline() {
   local scripts_root=$3
   local ports=$4
   local pkg_dir=$5
+  shift 5
+  local profiles=("$@")
 
   ensure_env_file "$pkg_dir"
 
@@ -66,22 +68,42 @@ execute_up_pipeline() {
   port_script=$(find_required_script "port-manager.sh" "$scripts_root")
   bash "$port_script" "$ports"
 
+  local resolver_script
+  resolver_script=$(find_required_script "profile-resolver.sh" "$scripts_root")
+  source "$resolver_script"
+
+  if [ ${#profiles[@]} -eq 0 ]; then
+    local selected
+    selected=$(prompt_interactive_profile_selection)
+    read -r -a profiles <<< "$selected"
+  fi
+
   local orch_script
   orch_script=$(find_required_script "stack-orchestration.sh" "$scripts_root")
-  bash "$orch_script" "$bin" "$compose_file"
-
-  local health_script
-  health_script=$(find_required_script "test-health.sh" "$scripts_root")
-  bash "$health_script" || true
+  bash "$orch_script" "$bin" "$compose_file" "${profiles[@]}"
 }
 
 execute_restart_pipeline() {
   local bin=$1
   local compose_file=$2
   local scripts_root=$3
+  shift 3
+  local profiles=("$@")
 
   echo -e "${BLUE}[frontend-deployment] Restarting infrastructure stack...${NC}"
-  $bin -f "$compose_file" restart
+  if [ ${#profiles[@]} -gt 0 ]; then
+    local resolver_script
+    resolver_script=$(find_required_script "profile-resolver.sh" "$scripts_root")
+    source "$resolver_script"
+    local resolved
+    resolved=$(resolve_profiles_and_dependencies "${profiles[@]}")
+    local profile_flags
+    profile_flags=$(echo "$resolved" | grep "^PROFILES=" | cut -d'=' -f2-)
+    # shellcheck disable=SC2086
+    $bin -f "$compose_file" $profile_flags restart
+  else
+    $bin -f "$compose_file" restart
+  fi
   echo -e "${GREEN}✓ Infrastructure stack restarted.${NC}"
 
   local health_script
@@ -145,10 +167,10 @@ main() {
 
   case "$command" in
     up)
-      execute_up_pipeline "$bin" "$compose_file" "$scripts_root" "$ports" "$pkg_dir"
+      execute_up_pipeline "$bin" "$compose_file" "$scripts_root" "$ports" "$pkg_dir" "$@"
       ;;
     restart)
-      execute_restart_pipeline "$bin" "$compose_file" "$scripts_root"
+      execute_restart_pipeline "$bin" "$compose_file" "$scripts_root" "$@"
       ;;
     down)
       execute_down_pipeline "$bin" "$compose_file"
@@ -190,7 +212,7 @@ main() {
       bash "$cf_script" "$@"
       ;;
     *)
-      echo "Usage: $0 {up|restart|down|status|logs|free-ports|health|certs|backup-purge|setup|cloudflare}"
+      echo "Usage: $0 {up [profile]|restart|down|status|logs|free-ports|health|certs|backup-purge|setup|cloudflare}"
       exit 1
       ;;
   esac

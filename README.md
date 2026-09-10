@@ -326,3 +326,82 @@ npm run service <service-name>
 ./scripts/manage.sh service <service-name>
 ```
 
+---
+
+## 9. Modular Stack Execution & Profile Management
+
+The infrastructure package supports modular, profile-driven container execution to allow developers to run only the sub-stacks required for their current work, saving RAM and speeding up startup.
+
+### A. Interactive Stack Selection Launcher
+
+Running `./scripts/manage.sh up` in an interactive terminal displays an interactive selection menu:
+
+```text
+=====================================================
+  LLM Observability Infrastructure Stack Selector    
+=====================================================
+Select the infrastructure stack profile you want to launch:
+
+  [1] Full Stack      - All 10 services (Default)
+  [2] Database Stack  - AlloyDB (PostgreSQL) + Redis Ledger
+  [3] Analytics Stack - ClickHouse Analytics DB
+  [4] Streaming Stack - Apache Kafka Event Broker
+  [5] Workflows Engine- Temporal Engine (+ auto-includes Database dependency)
+  [6] Tracing Stack   - Tempo + OpenTelemetry Collector + Grafana UI
+  [7] Network Gateway - Traefik Gateway + Service Registry
+  [8] Custom Profiles - Specify custom profiles (e.g. 'db streaming')
+-----------------------------------------------------
+Enter choice [1-8] (default: 1): 
+```
+
+*(Note: Running non-interactively or pressing Enter defaults to **Full Stack**, ensuring 100% backward compatibility.)*
+
+### B. Profile CLI Commands & Multi-Profile Combinations
+
+Launch specific profiles or multi-profile combinations directly from the command line:
+
+```bash
+# Launch Database Stack only (AlloyDB + Redis)
+./scripts/manage.sh up db
+
+# Launch Analytics Stack only (ClickHouse)
+./scripts/manage.sh up analytics
+
+# Launch Streaming Stack only (Apache Kafka)
+./scripts/manage.sh up streaming
+
+# Launch Workflows Engine (Temporal + auto-included AlloyDB dependency)
+./scripts/manage.sh up workflows
+
+# Launch Database + Network Gateway together
+./scripts/manage.sh up db network
+
+# Launch Database + Event Streaming (Kafka) together
+./scripts/manage.sh up db streaming
+
+# Launch Database + Tracing Stack (Tempo + OTel + Grafana) together
+./scripts/manage.sh up db tracing
+
+# Launch Full Stack (all 10 containers)
+./scripts/manage.sh up full
+```
+
+### C. Available Stack Profiles & Port Taxonomy
+
+| Profile Name | Included Services | Inter-Profile Dependencies | Terminal Output Endpoints & Configurations |
+|---|---|---|---|
+| **`db`** | `llmobs-alloydb`, `llmobs-redis` | *None* | `AlloyDB`: `postgresql://admin:***@localhost:31420/llm_observability`<br>`Redis`: `redis://:***@localhost:31413/0` |
+| **`analytics`** | `llmobs-clickhouse` | *None* | `ClickHouse HTTP`: `http://localhost:31421`<br>`ClickHouse Native`: `localhost:31422` |
+| **`streaming`** | `llmobs-kafka` | *None* | `Kafka Broker`: `localhost:31414` |
+| **`workflows`** | `llmobs-temporal` | **`db`** (`llmobs-alloydb`) | `Temporal gRPC`: `localhost:31424`<br>`Temporal Web UI`: `http://localhost:31425` |
+| **`tracing`** | `llmobs-tempo`, `llmobs-otel-collector`, `llmobs-grafana` | *None* | `Grafana Portal`: `http://localhost:31415`<br>`OTel HTTP`: `http://localhost:31417`<br>`Tempo`: `http://localhost:31416` |
+| **`network`** | `llmobs-traefik`, `llmobs-service-registry` | *None* | `Traefik HTTP`: `http://localhost:31410`<br>`Traefik Dashboard`: `http://localhost:31411`<br>`Service Registry`: `http://localhost:31426` |
+| **`full`** | All 10 services | *All* | All active endpoints listed above |
+
+### D. Automated Features
+
+1. **Automatic Dependency Resolution**: If a selected profile depends on another base layer (e.g. `workflows` requires `AlloyDB`), the dependent profile is automatically resolved and included so services never crash due to missing prerequisites.
+2. **Targeted Dynamic Health Checks**: Health verification runs strictly against the active services in the selected profile set (stopped/unselected profile containers are cleanly skipped).
+3. **Active Endpoint Reporting**: Upon completion, exact connection strings, ports, and web dashboard URLs for the running services are dynamically printed in terminal output.
+
+

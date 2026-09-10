@@ -7,92 +7,10 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-print_service_endpoints() {
-  echo -e "${GREEN}✓ All infrastructure services started/restarted successfully!${NC}"
-  echo -e "${BOLD}Service Endpoints:${NC}"
-  echo -e "  - Traefik Gateway HTTP:  http://localhost:31410  (→ redirects to HTTPS)"
-  echo -e "  - Traefik Gateway HTTPS: https://localhost:31419"
-  echo -e "  - Traefik Dashboard:     http://localhost:31411"
-  echo -e "  - Redis (auth required): localhost:31413"
-  echo -e "  - Kafka:                 localhost:31414"
-  echo -e "  - Grafana UI:            https://llmobs.grafana:31419"
-  echo -e "  - Grafana Tempo:         https://llmobs.tempo:31419"
-  echo -e "  - OTel Collector HTTP:   http://localhost:31417"
-  echo -e "  - OTel Collector gRPC:   localhost:31418"
-  echo -e "  - Service Registry API:  http://localhost:31426"
-}
-
-wait_with_exponential_backoff_jitter() {
-  local check_cmd=$1
-  local max_attempts=${2:-6}
-  local base_delay=${3:-1}
-  local max_delay=${4:-12}
-  local attempt=0
-
-  while [ $attempt -lt $max_attempts ]; do
-    if eval "$check_cmd" >/dev/null 2>&1; then
-      return 0
-    fi
-    attempt=$((attempt + 1))
-    if [ $attempt -ge $max_attempts ]; then
-      break
-    fi
-
-    local exp=$((1 << attempt))
-    local cap=$((base_delay * exp))
-    if [ $cap -gt $max_delay ]; then
-      cap=$max_delay
-    fi
-
-    local jitter=$(( (RANDOM % cap) + 1 ))
-    sleep "$jitter"
-  done
-  return 1
-}
-
-wait_for_container_health() {
-  local container=$1
-  echo -e "${BLUE}  - Waiting for container ${container} to complete startup...${NC}"
-  local check_cmd="docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' '$container' 2>/dev/null | grep -q 'healthy\|running'"
-  if wait_with_exponential_backoff_jitter "$check_cmd" 6 1 8; then
-    echo -e "${GREEN}✓ ${container} is ready.${NC}"
-    return 0
-  fi
-  echo -e "${YELLOW}⚠️ ${container} initialization still in progress...${NC}"
-}
-
-wait_for_clickhouse_http() {
-  echo -e "${BLUE}  - Waiting for ClickHouse HTTP & Native TCP socket binding...${NC}"
-  local check_cmd="curl -s http://localhost:31421/ping 2>/dev/null | grep -q 'Ok.' || nc -z localhost 31421 2>/dev/null"
-  if wait_with_exponential_backoff_jitter "$check_cmd" 10 1 15; then
-    echo -e "${GREEN}✓ ClickHouse HTTP (31421) & Native (31422) endpoints ready.${NC}"
-    return 0
-  fi
-  echo -e "${RED}✖ ERROR: ClickHouse socket binding timeout exceeded (30s hard ceiling).${NC}"
-  return 1
-}
-
-wait_for_web_gateways() {
-  echo -e "${BLUE}  - Waiting for Grafana UI & Temporal engine socket bindings...${NC}"
-  local check_cmd="curl -s http://localhost:31415/api/health 2>/dev/null | grep -q 'ok' && nc -z localhost 31424 2>/dev/null"
-  if wait_with_exponential_backoff_jitter "$check_cmd" 8 1 12; then
-    echo -e "${GREEN}✓ Grafana UI (31415) & Temporal gRPC (31424) endpoints ready.${NC}"
-    return 0
-  fi
-  echo -e "${RED}✖ ERROR: Gateway initialization timeout exceeded (30s hard ceiling).${NC}"
-  return 1
-}
-
-wait_for_alloydb() {
-  echo -e "${BLUE}  - Waiting for AlloyDB database engine consistent recovery state...${NC}"
-  local check_cmd="docker exec -i llmobs-alloydb-db pg_isready 2>/dev/null | grep -q 'accepting connections' || nc -z localhost 31420 2>/dev/null"
-  if wait_with_exponential_backoff_jitter "$check_cmd" 10 1 15; then
-    echo -e "${GREEN}✓ AlloyDB relational database ready.${NC}"
-    return 0
-  fi
-  echo -e "${RED}✖ ERROR: AlloyDB database recovery timeout exceeded (30s hard ceiling).${NC}"
-  return 1
-}
+CURRENT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$CURRENT_DIR/profile-resolver.sh"
+source "$CURRENT_DIR/targeted-health.sh"
+source "$CURRENT_DIR/endpoint-reporter.sh"
 
 ensure_external_network() {
   local net_name="llmobs-network"
@@ -109,31 +27,44 @@ ensure_external_network() {
   fi
 }
 
-start_ordered_stack() {
+start_profile_stack() {
   local bin=$1
   local compose_file=$2
+  shift 2
+  local user_args=("$@")
 
   ensure_external_network
 
-  echo -e "${BLUE}⚡ Step 1/3: Starting core databases (AlloyDB, Redis, ClickHouse)...${NC}"
-  $bin -f "$compose_file" up -d llmobs-alloydb llmobs-redis llmobs-clickhouse || true
-  wait_for_alloydb
-  wait_for_clickhouse_http 20
+  # Resolve profiles and target services dynamically
+  local resolved
+  resolved=$(resolve_profiles_and_dependencies "${user_args[@]}")
 
-  echo -e "${BLUE}⚡ Step 2/3: Starting telemetry & event streams (Kafka, Tempo, OTel Collector)...${NC}"
-  $bin -f "$compose_file" up -d llmobs-kafka llmobs-tempo llmobs-otel-collector || true
+  local profile_flags
+  profile_flags=$(echo "$resolved" | grep "^PROFILES=" | cut -d'=' -f2-)
+  local target_services
+  target_services=$(echo "$resolved" | grep "^SERVICES=" | cut -d'=' -f2-)
 
-  echo -e "${BLUE}⚡ Step 3/3: Starting web gateways, service registry & orchestration engines...${NC}"
-  $bin -f "$compose_file" up -d llmobs-traefik llmobs-grafana llmobs-temporal llmobs-service-registry || true
-  wait_for_web_gateways 20
+  echo -e "${BLUE}⚡ Launching infrastructure stack with flags: ${BOLD}${profile_flags}${NC}"
+  echo -e "${BLUE}⚡ Target services: ${BOLD}${target_services}${NC}"
 
-  print_service_endpoints
+  # Execute compose up with profiles
+  # shellcheck disable=SC2086
+  $bin -f "$compose_file" $profile_flags up -d $target_services
+
+  # Run targeted health checks for active services
+  # shellcheck disable=SC2086
+  run_targeted_health_checks $target_services
+
+  # Output active working endpoints and configurations
+  # shellcheck disable=SC2086
+  print_active_endpoints $target_services
 }
 
 main() {
   local bin=$1
   local compose_file=$2
-  start_ordered_stack "$bin" "$compose_file"
+  shift 2 || true
+  start_profile_stack "$bin" "$compose_file" "$@"
 }
 
 main "$@"
