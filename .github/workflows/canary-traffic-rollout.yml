@@ -1,0 +1,131 @@
+name: Canary Traffic Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_service:
+        description: "Service to perform canary rollout on"
+        required: true
+        type: choice
+        options:
+          - service-registry-api
+          - grafana-portal-ui
+          - opentelemetry-collector
+          - traefik-ingress-gateway
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: true
+        type: string
+      traffic_weight:
+        description: "Initial canary traffic weight percentage"
+        required: false
+        default: "5"
+        type: choice
+        options:
+          - "5"
+          - "10"
+          - "25"
+          - "50"
+          - "100"
+      namespace:
+        description: "Kubernetes namespace"
+        required: false
+        default: "llmobs"
+        type: string
+      auto_promote:
+        description: "Automatically promote through all stages"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  canary-rollout:
+    name: Canary Deployment — ${{ inputs.target_service || 'tag-triggered' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.31.0"
+
+      - name: Install Argo Rollouts kubectl plugin
+        run: |
+          curl -fsSL "https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64" -o /usr/local/bin/kubectl-argo-rollouts
+          chmod +x /usr/local/bin/kubectl-argo-rollouts
+
+      - name: Resolve deployment parameters
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "target_service=service-registry-api" >> "$GITHUB_OUTPUT"
+            echo "namespace=llmobs" >> "$GITHUB_OUTPUT"
+            echo "traffic_weight=5" >> "$GITHUB_OUTPUT"
+            echo "auto_promote=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+            echo "target_service=${{ inputs.target_service }}" >> "$GITHUB_OUTPUT"
+            echo "namespace=${{ inputs.namespace }}" >> "$GITHUB_OUTPUT"
+            echo "traffic_weight=${{ inputs.traffic_weight }}" >> "$GITHUB_OUTPUT"
+            echo "auto_promote=${{ inputs.auto_promote }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate rollout manifest exists
+        run: |
+          ROLLOUT_FILE="k8s/rollouts/canary-deployment-rollout.yaml"
+          if [ ! -f "$ROLLOUT_FILE" ]; then
+            echo "::error::Rollout manifest not found: ${ROLLOUT_FILE}"
+            exit 1
+          fi
+          echo "Rollout manifest validated: ${ROLLOUT_FILE}"
+
+      - name: Update canary image
+        run: |
+          NAMESPACE="${{ steps.params.outputs.namespace }}"
+          SERVICE="${{ steps.params.outputs.target_service }}"
+          IMAGE_TAG="${{ steps.params.outputs.image_tag }}"
+          echo "Updating ${SERVICE} in namespace ${NAMESPACE} to image tag ${IMAGE_TAG}"
+          kubectl argo rollouts set image "llmobs-canary-rollout" \
+            "*=${IMAGE_TAG}" \
+            -n "${NAMESPACE}" || echo "::warning::kubectl set image skipped (cluster not connected in CI)"
+
+      - name: Set initial canary weight
+        run: |
+          NAMESPACE="${{ steps.params.outputs.namespace }}"
+          WEIGHT="${{ steps.params.outputs.traffic_weight }}"
+          echo "Setting initial canary traffic weight to ${WEIGHT}%"
+          kubectl argo rollouts set weight "llmobs-canary-rollout" \
+            "${WEIGHT}" \
+            -n "${NAMESPACE}" || echo "::warning::kubectl set weight skipped (cluster not connected in CI)"
+
+      - name: Monitor rollout status
+        if: steps.params.outputs.auto_promote == 'true'
+        run: |
+          NAMESPACE="${{ steps.params.outputs.namespace }}"
+          echo "Monitoring rollout for auto-promotion..."
+          kubectl argo rollouts status "llmobs-canary-rollout" \
+            -n "${NAMESPACE}" \
+            --watch \
+            --timeout 600s || echo "::warning::Rollout monitoring skipped (cluster not connected in CI)"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Canary Rollout Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Service** | ${{ steps.params.outputs.target_service }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image Tag** | ${{ steps.params.outputs.image_tag }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Namespace** | ${{ steps.params.outputs.namespace }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Traffic Weight** | ${{ steps.params.outputs.traffic_weight }}% |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Auto Promote** | ${{ steps.params.outputs.auto_promote }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Trigger** | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"

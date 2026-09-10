@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmobs-kafka-broker
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/instance: llmobs-kafka-broker
+    app.kubernetes.io/component: streaming
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+      app.kubernetes.io/instance: llmobs-kafka-broker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/instance: llmobs-kafka-broker
+        app.kubernetes.io/component: streaming
+        app.kubernetes.io/part-of: llm-obs-infra
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: kafka
+          image: apache/kafka:latest
+          ports:
+            - containerPort: 9092
+              name: broker
+              protocol: TCP
+            - containerPort: 9093
+              name: controller
+              protocol: TCP
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://llmobs-kafka-broker.llmobs.svc.cluster.local:9092"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@localhost:9093"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_NUM_PARTITIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: KAFKA_NUM_PARTITIONS
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms512m -Xmx1024m"
+            - name: OTEL_SERVICE_NAME
+              value: "llmobs-kafka-broker"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          readinessProbe:
+            tcpSocket:
+              port: broker
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: broker
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+      volumes:
+        - name: kafka-data
+          persistentVolumeClaim:
+            claimName: kafka-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmobs-kafka-broker
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/instance: llmobs-kafka-broker
+    app.kubernetes.io/component: streaming
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9092
+      targetPort: broker
+      protocol: TCP
+      name: broker
+  selector:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/instance: llmobs-kafka-broker

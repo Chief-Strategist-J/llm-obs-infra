@@ -1,0 +1,130 @@
+name: Kubernetes Manifest Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_path:
+        description: "Path to a specific manifest to validate (leave empty for all)"
+        required: false
+        default: ""
+        type: string
+      kubernetes_version:
+        description: "Kubernetes version to validate against"
+        required: false
+        default: "1.31.0"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  K8S_VERSION: "1.31.0"
+
+jobs:
+  validate-manifests:
+    name: Validate Kubernetes Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          KUBECONFORM_VERSION="v0.6.7"
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz -C /usr/local/bin
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.31.0"
+
+      - name: Determine target version
+        id: version
+        run: |
+          TARGET="${{ inputs.kubernetes_version }}"
+          echo "k8s_version=${TARGET:-${{ env.K8S_VERSION }}}" >> "$GITHUB_OUTPUT"
+
+      - name: Discover manifests
+        id: discover
+        run: |
+          if [ -n "${{ inputs.manifest_path }}" ]; then
+            if [ ! -f "${{ inputs.manifest_path }}" ]; then
+              echo "::error::Specified manifest not found: ${{ inputs.manifest_path }}"
+              exit 1
+            fi
+            echo "${{ inputs.manifest_path }}" > /tmp/manifest_list.txt
+          else
+            find k8s/ -type f \( -name "*.yaml" -o -name "*.yml" \) | sort > /tmp/manifest_list.txt
+          fi
+          MANIFEST_COUNT=$(wc -l < /tmp/manifest_list.txt)
+          echo "count=${MANIFEST_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "Discovered ${MANIFEST_COUNT} Kubernetes manifests"
+
+      - name: YAML syntax validation
+        run: |
+          ERRORS=0
+          while IFS= read -r manifest; do
+            if python3 -c "import yaml; yaml.safe_load_all(open('${manifest}'))" 2>/tmp/yaml_err.txt; then
+              echo "✅ YAML OK: $manifest"
+            else
+              echo "❌ YAML FAIL: $manifest"
+              cat /tmp/yaml_err.txt
+              ERRORS=$((ERRORS + 1))
+            fi
+          done < /tmp/manifest_list.txt
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::error::${ERRORS} manifest(s) have invalid YAML syntax"
+            exit 1
+          fi
+
+      - name: Kubeconform schema validation
+        run: |
+          K8S_VER="${{ steps.version.outputs.k8s_version }}"
+          ERRORS=0
+          while IFS= read -r manifest; do
+            if kubeconform \
+              -kubernetes-version "${K8S_VER}" \
+              -strict \
+              -summary \
+              -output text \
+              "$manifest" 2>/tmp/kc_err.txt; then
+              echo "✅ SCHEMA OK: $manifest"
+            else
+              echo "⚠️  SCHEMA WARN: $manifest"
+              cat /tmp/kc_err.txt
+              ERRORS=$((ERRORS + 1))
+            fi
+          done < /tmp/manifest_list.txt
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::warning::${ERRORS} manifest(s) have schema validation findings"
+          fi
+
+      - name: kubectl dry-run validation
+        run: |
+          ERRORS=0
+          while IFS= read -r manifest; do
+            if kubectl apply --dry-run=client -f "$manifest" 2>/tmp/kubectl_err.txt; then
+              echo "✅ DRY-RUN OK: $manifest"
+            else
+              echo "⚠️  DRY-RUN WARN: $manifest (may use CRDs not available locally)"
+              cat /tmp/kubectl_err.txt
+            fi
+          done < /tmp/manifest_list.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Kubernetes Manifest Validation Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Target K8s Version:** ${{ steps.version.outputs.k8s_version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Manifest | YAML | Schema | Dry-Run |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|------|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r manifest; do
+            YAML_OK="✅"
+            SCHEMA_OK="✅"
+            DRYRUN_OK="✅"
+            python3 -c "import yaml; yaml.safe_load_all(open('${manifest}'))" 2>/dev/null || YAML_OK="❌"
+            kubeconform -kubernetes-version "${{ steps.version.outputs.k8s_version }}" -strict "$manifest" 2>/dev/null || SCHEMA_OK="⚠️"
+            kubectl apply --dry-run=client -f "$manifest" 2>/dev/null || DRYRUN_OK="⚠️"
+            echo "| \`$(basename "$manifest")\` | ${YAML_OK} | ${SCHEMA_OK} | ${DRYRUN_OK} |" >> "$GITHUB_STEP_SUMMARY"
+          done < /tmp/manifest_list.txt

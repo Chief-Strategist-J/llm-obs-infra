@@ -1,0 +1,101 @@
+name: Compose Profile Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Specific profile to validate (leave empty for all)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - db
+          - analytics
+          - streaming
+          - workflows
+          - tracing
+          - network
+          - full
+
+permissions:
+  contents: read
+
+env:
+  PROFILES: "db analytics streaming workflows tracing network full"
+
+jobs:
+  validate-compose-profiles:
+    name: Validate Compose Profiles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: |
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+
+      - name: Create external network
+        run: docker network create llmobs-network 2>/dev/null || true
+
+      - name: Determine target profiles
+        id: profiles
+        run: |
+          if [ -n "${{ inputs.profile }}" ]; then
+            echo "targets=${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "targets=${PROFILES}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate profile configurations
+        run: |
+          ERRORS=0
+          for profile in ${{ steps.profiles.outputs.targets }}; do
+            echo "--- Validating profile: ${profile} ---"
+            if docker compose --profile "${profile}" config --quiet 2>/tmp/compose_err.txt; then
+              SERVICES=$(docker compose --profile "${profile}" config --services 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+              echo "✅ PASS [${profile}]: ${SERVICES}"
+            else
+              echo "❌ FAIL [${profile}]:"
+              cat /tmp/compose_err.txt
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::error::${ERRORS} profile(s) failed validation"
+            exit 1
+          fi
+
+      - name: Cross-profile dependency check
+        run: |
+          echo "Checking for circular or missing cross-profile dependencies..."
+          for profile in ${PROFILES}; do
+            docker compose --profile "${profile}" config --services 2>/dev/null | while IFS= read -r svc; do
+              DEPS=$(docker compose --profile "${profile}" config 2>/dev/null | grep -A 50 "^  ${svc}:" | grep -A 20 "depends_on:" | grep -E "^\s+\w" | head -10 || true)
+              if [ -n "$DEPS" ]; then
+                echo "[${profile}/${svc}] depends_on: $(echo "$DEPS" | tr '\n' ' ')"
+              fi
+            done
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Compose Profile Validation Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Profile | Status | Services |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|--------|----------|" >> "$GITHUB_STEP_SUMMARY"
+          for profile in ${PROFILES}; do
+            if docker compose --profile "${profile}" config --quiet 2>/dev/null; then
+              SERVICES=$(docker compose --profile "${profile}" config --services 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+              echo "| \`${profile}\` | ✅ Pass | ${SERVICES} |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| \`${profile}\` | ❌ Fail | — |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Cleanup
+        if: always()
+        run: docker network rm llmobs-network 2>/dev/null || true

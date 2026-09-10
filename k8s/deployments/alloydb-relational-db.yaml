@@ -1,0 +1,175 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmobs-alloydb-db
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: alloydb
+    app.kubernetes.io/instance: llmobs-alloydb-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloydb
+      app.kubernetes.io/instance: llmobs-alloydb-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alloydb
+        app.kubernetes.io/instance: llmobs-alloydb-db
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: llm-obs-infra
+    spec:
+      terminationGracePeriodSeconds: 60
+      initContainers:
+        - name: fix-archive-permissions
+          image: busybox:1.37
+          command: ["sh", "-c", "install -d -o 999 -g 999 -m 0700 /var/lib/postgresql/archive"]
+          volumeMounts:
+            - name: alloydb-archive
+              mountPath: /var/lib/postgresql/archive
+      containers:
+        - name: alloydb
+          image: google/alloydbomni:15
+          ports:
+            - containerPort: 5432
+              name: postgres
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: ALLOYDB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: ALLOYDB_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: ALLOYDB_DB
+            - name: ALLOYDB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: ALLOYDB_USER
+            - name: ALLOYDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: ALLOYDB_PASSWORD
+            - name: ALLOYDB_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: ALLOYDB_DB
+            - name: OTEL_SERVICE_NAME
+              value: "llmobs-alloydb-db"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+          args:
+            - "postgres"
+            - "-c"
+            - "config_file=/etc/postgresql/postgresql.conf"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          readinessProbe:
+            exec:
+              command:
+                - "pg_isready"
+                - "-h"
+                - "127.0.0.1"
+                - "-U"
+                - "admin"
+                - "-d"
+                - "llm_observability"
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 15
+          livenessProbe:
+            exec:
+              command:
+                - "pg_isready"
+                - "-h"
+                - "127.0.0.1"
+                - "-U"
+                - "admin"
+                - "-d"
+                - "llm_observability"
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: alloydb-data
+              mountPath: /var/lib/postgresql/data
+            - name: alloydb-archive
+              mountPath: /var/lib/postgresql/archive
+            - name: alloydb-config
+              mountPath: /etc/postgresql/postgresql.conf
+              subPath: postgresql.conf
+              readOnly: true
+            - name: alloydb-init-security
+              mountPath: /docker-entrypoint-initdb.d/10-security-audit.sql
+              subPath: security-audit.sql
+              readOnly: true
+            - name: alloydb-init-extensions
+              mountPath: /docker-entrypoint-initdb.d/20-init-extensions.sql
+              subPath: init-extensions.sql
+              readOnly: true
+      volumes:
+        - name: alloydb-data
+          persistentVolumeClaim:
+            claimName: alloydb-data-pvc
+        - name: alloydb-archive
+          persistentVolumeClaim:
+            claimName: alloydb-archive-pvc
+        - name: alloydb-config
+          configMap:
+            name: alloydb-config
+            optional: true
+        - name: alloydb-init-security
+          configMap:
+            name: alloydb-init-security
+            optional: true
+        - name: alloydb-init-extensions
+          configMap:
+            name: alloydb-init-extensions
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmobs-alloydb-db
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: alloydb
+    app.kubernetes.io/instance: llmobs-alloydb-db
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: postgres
+      protocol: TCP
+      name: postgres
+  selector:
+    app.kubernetes.io/name: alloydb
+    app.kubernetes.io/instance: llmobs-alloydb-db

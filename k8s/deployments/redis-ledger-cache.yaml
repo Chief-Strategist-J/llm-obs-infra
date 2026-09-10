@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmobs-redis-ledger
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: llmobs-redis-ledger
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: llmobs-redis-ledger
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: llmobs-redis-ledger
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: llm-obs-infra
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command:
+            - "redis-server"
+            - "/etc/redis/redis.conf"
+            - "--requirepass"
+            - "$(REDIS_PASSWORD)"
+          ports:
+            - containerPort: 6379
+              name: redis
+              protocol: TCP
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: REDIS_PASSWORD
+            - name: OTEL_SERVICE_NAME
+              value: "llmobs-redis-ledger"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          readinessProbe:
+            exec:
+              command:
+                - "redis-cli"
+                - "ping"
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command:
+                - "redis-cli"
+                - "ping"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          volumeMounts:
+            - name: redis-config
+              mountPath: /etc/redis/redis.conf
+              subPath: redis.conf
+              readOnly: true
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-config
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmobs-redis-ledger
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: llmobs-redis-ledger
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: llmobs-redis-ledger

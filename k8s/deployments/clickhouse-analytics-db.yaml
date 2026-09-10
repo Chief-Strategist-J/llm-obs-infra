@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmobs-clickhouse-analytics
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/instance: llmobs-clickhouse-analytics
+    app.kubernetes.io/component: analytics
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clickhouse
+      app.kubernetes.io/instance: llmobs-clickhouse-analytics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clickhouse
+        app.kubernetes.io/instance: llmobs-clickhouse-analytics
+        app.kubernetes.io/component: analytics
+        app.kubernetes.io/part-of: llm-obs-infra
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:latest
+          ports:
+            - containerPort: 8123
+              name: http
+              protocol: TCP
+            - containerPort: 9000
+              name: native
+              protocol: TCP
+          env:
+            - name: CLICKHOUSE_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: CLICKHOUSE_DB
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: CLICKHOUSE_USER
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: CLICKHOUSE_PASSWORD
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+            - name: OTEL_SERVICE_NAME
+              value: "llmobs-clickhouse-analytics"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: clickhouse-data
+              mountPath: /var/lib/clickhouse
+            - name: clickhouse-config
+              mountPath: /etc/clickhouse-server/config.d
+              readOnly: true
+            - name: clickhouse-users
+              mountPath: /etc/clickhouse-server/users.d
+      volumes:
+        - name: clickhouse-data
+          persistentVolumeClaim:
+            claimName: clickhouse-data-pvc
+        - name: clickhouse-config
+          configMap:
+            name: clickhouse-config
+            optional: true
+        - name: clickhouse-users
+          configMap:
+            name: clickhouse-users-config
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmobs-clickhouse-analytics
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/instance: llmobs-clickhouse-analytics
+    app.kubernetes.io/component: analytics
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8123
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 9000
+      targetPort: native
+      protocol: TCP
+      name: native
+  selector:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/instance: llmobs-clickhouse-analytics

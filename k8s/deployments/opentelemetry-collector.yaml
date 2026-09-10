@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmobs-otel-collector
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: llmobs-otel-collector
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+      app.kubernetes.io/instance: llmobs-otel-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-collector
+        app.kubernetes.io/instance: llmobs-otel-collector
+        app.kubernetes.io/component: tracing
+        app.kubernetes.io/part-of: llm-obs-infra
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:latest
+          args:
+            - "--config=/etc/otel-collector-config.yaml"
+          ports:
+            - containerPort: 4318
+              name: otlp-http
+              protocol: TCP
+            - containerPort: 4317
+              name: otlp-grpc
+              protocol: TCP
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: "llmobs-otel-collector"
+            - name: GOMEMLIMIT
+              value: "858993459"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+              readOnly: true
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmobs-otel-collector
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: llmobs-otel-collector
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4318
+      targetPort: otlp-http
+      protocol: TCP
+      name: otlp-http
+    - port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+      name: otlp-grpc
+  selector:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: llmobs-otel-collector

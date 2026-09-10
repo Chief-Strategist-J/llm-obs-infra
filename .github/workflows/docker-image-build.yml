@@ -1,0 +1,140 @@
+name: Docker Image Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: "Image name to build"
+        required: true
+        type: choice
+        options:
+          - llmobs-service-registry
+      dockerfile_path:
+        description: "Path to Dockerfile"
+        required: false
+        default: "service-discovery/Dockerfile"
+        type: string
+      build_context:
+        description: "Docker build context path"
+        required: false
+        default: "service-discovery"
+        type: string
+      image_tag:
+        description: "Image tag (leave empty for auto-generated)"
+        required: false
+        default: ""
+        type: string
+      registry:
+        description: "Container registry"
+        required: false
+        default: "ghcr.io"
+        type: choice
+        options:
+          - ghcr.io
+          - docker.io
+      push_image:
+        description: "Push image to registry"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  DEFAULT_REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    name: Build — ${{ inputs.image_name || 'release-triggered' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve build parameters
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            echo "image_name=llmobs-service-registry" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=service-discovery/Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "context=service-discovery" >> "$GITHUB_OUTPUT"
+            echo "registry=${{ env.DEFAULT_REGISTRY }}" >> "$GITHUB_OUTPUT"
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            TAG="${{ inputs.image_tag }}"
+            echo "image_name=${{ inputs.image_name }}" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=${{ inputs.dockerfile_path }}" >> "$GITHUB_OUTPUT"
+            echo "context=${{ inputs.build_context }}" >> "$GITHUB_OUTPUT"
+            echo "registry=${{ inputs.registry }}" >> "$GITHUB_OUTPUT"
+            echo "push=${{ inputs.push_image }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="sha-$(echo "${{ github.sha }}" | cut -c1-7)"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Dockerfile exists
+        run: |
+          DOCKERFILE="${{ steps.params.outputs.dockerfile }}"
+          if [ ! -f "$DOCKERFILE" ]; then
+            echo "::error::Dockerfile not found at: ${DOCKERFILE}"
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: steps.params.outputs.push == 'true' && steps.params.outputs.registry == 'ghcr.io'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: steps.params.outputs.push == 'true' && steps.params.outputs.registry == 'docker.io'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ steps.params.outputs.registry }}/${{ github.repository_owner }}/${{ steps.params.outputs.image_name }}
+          tags: |
+            type=raw,value=${{ steps.params.outputs.tag }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ steps.params.outputs.context }}
+          file: ${{ steps.params.outputs.dockerfile }}
+          push: ${{ steps.params.outputs.push }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Docker Image Build Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | ${{ steps.params.outputs.image_name }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Tag** | ${{ steps.params.outputs.tag }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Registry** | ${{ steps.params.outputs.registry }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Pushed** | ${{ steps.params.outputs.push }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Trigger** | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"

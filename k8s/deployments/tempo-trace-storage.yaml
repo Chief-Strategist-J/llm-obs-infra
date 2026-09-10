@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmobs-tempo-tracing
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: llmobs-tempo-tracing
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+      app.kubernetes.io/instance: llmobs-tempo-tracing
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tempo
+        app.kubernetes.io/instance: llmobs-tempo-tracing
+        app.kubernetes.io/component: tracing
+        app.kubernetes.io/part-of: llm-obs-infra
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: tempo
+          image: grafana/tempo:latest
+          args:
+            - "-config.file=/etc/tempo/tempo-config.yaml"
+          ports:
+            - containerPort: 3200
+              name: http
+              protocol: TCP
+            - containerPort: 4317
+              name: otlp-grpc
+              protocol: TCP
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: "llmobs-tempo-tracing"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          volumeMounts:
+            - name: tempo-data
+              mountPath: /var/tempo
+            - name: tempo-config
+              mountPath: /etc/tempo/tempo-config.yaml
+              subPath: tempo-config.yaml
+              readOnly: true
+      volumes:
+        - name: tempo-data
+          persistentVolumeClaim:
+            claimName: tempo-data-pvc
+        - name: tempo-config
+          configMap:
+            name: tempo-config
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmobs-tempo-tracing
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: llmobs-tempo-tracing
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3200
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+      name: otlp-grpc
+  selector:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: llmobs-tempo-tracing

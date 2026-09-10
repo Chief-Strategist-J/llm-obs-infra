@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alloydb-data-pvc
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/part-of: llm-obs-infra
+    app.kubernetes.io/component: database
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alloydb-archive-pvc
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/part-of: llm-obs-infra
+    app.kubernetes.io/component: database
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clickhouse-data-pvc
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/part-of: llm-obs-infra
+    app.kubernetes.io/component: analytics
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tempo-data-pvc
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/part-of: llm-obs-infra
+    app.kubernetes.io/component: tracing
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data-pvc
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/part-of: llm-obs-infra
+    app.kubernetes.io/component: tracing
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data-pvc
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/part-of: llm-obs-infra
+    app.kubernetes.io/component: streaming
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard

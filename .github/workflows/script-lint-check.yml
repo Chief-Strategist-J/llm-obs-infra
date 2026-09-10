@@ -1,0 +1,88 @@
+name: Shell Script Lint Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      script_path:
+        description: "Path to a specific script to lint (leave empty to lint all)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  lint-shell-scripts:
+    name: Lint Shell Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Discover scripts
+        id: discover
+        run: |
+          if [ -n "${{ inputs.script_path }}" ]; then
+            if [ ! -f "${{ inputs.script_path }}" ]; then
+              echo "::error::Specified script not found: ${{ inputs.script_path }}"
+              exit 1
+            fi
+            echo "${{ inputs.script_path }}" > /tmp/script_list.txt
+          else
+            find scripts/ -type f -name "*.sh" | sort > /tmp/script_list.txt
+          fi
+          SCRIPT_COUNT=$(wc -l < /tmp/script_list.txt)
+          echo "count=${SCRIPT_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "Discovered ${SCRIPT_COUNT} shell scripts"
+
+      - name: Bash syntax check
+        run: |
+          ERRORS=0
+          while IFS= read -r script; do
+            if bash -n "$script" 2>/tmp/bash_err.txt; then
+              echo "✅ PASS: $script"
+            else
+              echo "❌ FAIL: $script"
+              cat /tmp/bash_err.txt
+              ERRORS=$((ERRORS + 1))
+            fi
+          done < /tmp/script_list.txt
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::error::${ERRORS} script(s) failed bash syntax check"
+            exit 1
+          fi
+
+      - name: ShellCheck static analysis
+        run: |
+          ERRORS=0
+          while IFS= read -r script; do
+            if shellcheck --severity=error --shell=bash "$script" 2>/tmp/sc_err.txt; then
+              echo "✅ PASS: $script"
+            else
+              echo "⚠️  WARN: $script"
+              cat /tmp/sc_err.txt
+              ERRORS=$((ERRORS + 1))
+            fi
+          done < /tmp/script_list.txt
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::warning::${ERRORS} script(s) have ShellCheck findings (severity=error)"
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Shell Script Lint Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Script | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r script; do
+            if bash -n "$script" 2>/dev/null; then
+              echo "| \`$script\` | ✅ Pass |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| \`$script\` | ❌ Fail |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done < /tmp/script_list.txt

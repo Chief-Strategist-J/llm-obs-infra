@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmobs-grafana-portal
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: llmobs-grafana-portal
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+      app.kubernetes.io/instance: llmobs-grafana-portal
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: grafana
+        app.kubernetes.io/instance: llmobs-grafana-portal
+        app.kubernetes.io/component: tracing
+        app.kubernetes.io/part-of: llm-obs-infra
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 472
+        runAsUser: 472
+        runAsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:latest
+          ports:
+            - containerPort: 3000
+              name: http
+              protocol: TCP
+          env:
+            - name: GF_INSTALL_PLUGINS
+              value: "grafana-clickhouse-datasource,redis-datasource"
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: GF_SECURITY_ADMIN_USER
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llmobs-credentials
+                  key: GF_SECURITY_ADMIN_PASSWORD
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_USERS_ALLOW_ORG_CREATE
+              value: "false"
+            - name: GF_SECURITY_DISABLE_GRAVATAR
+              value: "true"
+            - name: GF_SECURITY_COOKIE_SECURE
+              value: "true"
+            - name: GF_SECURITY_STRICT_TRANSPORT_SECURITY
+              value: "true"
+            - name: GF_SECURITY_X_CONTENT_TYPE_OPTIONS
+              value: "true"
+            - name: GF_SECURITY_X_XSS_PROTECTION
+              value: "true"
+            - name: GF_TRACING_OPENTELEMETRY_OTLP_ADDRESS
+              value: "llmobs-otel-collector.llmobs.svc.cluster.local:4317"
+            - name: GF_TRACING_OPENTELEMETRY_OTLP_PROPAGATION_FORMAT
+              value: "w3c"
+            - name: OTEL_SERVICE_NAME
+              value: "llmobs-grafana-portal"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: llmobs-system-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+            - name: grafana-provisioning
+              mountPath: /etc/grafana/provisioning
+              readOnly: true
+      volumes:
+        - name: grafana-data
+          persistentVolumeClaim:
+            claimName: grafana-data-pvc
+        - name: grafana-provisioning
+          configMap:
+            name: grafana-provisioning
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmobs-grafana-portal
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: llmobs-grafana-portal
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/part-of: llm-obs-infra
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: llmobs-grafana-portal
