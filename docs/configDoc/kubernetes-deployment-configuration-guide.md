@@ -757,3 +757,99 @@ kubectl top pods -n llmobs --containers
 # 4. View kernel dmesg OOM killer invocations on the host
 dmesg -T | grep -E -i "killed process|oom_reaper"
 ```
+
+---
+
+## 12. Modular Kubernetes Execution Scripts & Individual Service Management (`k8s/scripts/`)
+
+To provide feature parity with the root Docker management scripts while keeping Kubernetes operations completely isolated, a dedicated script suite exists under `k8s/scripts/`. This suite enables independent execution, deployment, health verification, logs inspection, and port forwarding for individual microservices as well as the entire Kubernetes stack.
+
+### 12.1 Script Directory Architecture
+
+```
+k8s/scripts/
+├── common.sh                   # Core shared utilities, cluster verification, foundation provisioning
+├── bootstrap-cluster.sh        # Provisions foundations (ns, configmap, secrets, persistent-volume-claims)
+├── teardown-cluster.sh         # Gracefully tears down individual services or the entire namespace/cluster
+├── test-health.sh              # Health checks: readiness, probes, events for individual service or all
+├── port-forward.sh             # Port forward individual service or all services to local ports
+├── manage.sh                   # Master orchestrator (up, down, restart, status, logs, health, port-forward)
+└── services/
+    ├── deploy-alloydb.sh       # Individual AlloyDB relational DB manager (Port 5432)
+    ├── deploy-redis.sh         # Individual Redis ledger cache manager (Port 6379)
+    ├── deploy-clickhouse.sh    # Individual ClickHouse analytics DB manager (Ports 8123, 9000)
+    ├── deploy-kafka.sh         # Individual Kafka event broker manager (Ports 9092, 9093)
+    ├── deploy-tempo.sh         # Individual Tempo trace storage manager (Ports 3200, 4317)
+    ├── deploy-otel-collector.sh# Individual OpenTelemetry Collector manager (Ports 4318, 4317, 13133)
+    ├── deploy-grafana.sh       # Individual Grafana portal UI manager (Port 3000)
+    ├── deploy-temporal.sh      # Individual Temporal workflow engine manager (Port 7233)
+    └── deploy-canary-rollout.sh# Individual Argo Rollouts canary manager (Port 31426, promote/abort/retry)
+```
+
+### 12.2 Individual Service Script Commands
+
+Each script in `k8s/scripts/services/` operates autonomously and exposes a standardized CLI interface:
+
+```bash
+# Syntax: ./k8s/scripts/services/deploy-<service>.sh {up|down|restart|status|logs [flags]|health|port-forward [port]}
+
+# 1. Start an individual service (automatically creates namespace, secrets, and PVCs if needed)
+./k8s/scripts/services/deploy-alloydb.sh up
+./k8s/scripts/services/deploy-kafka.sh up
+./k8s/scripts/services/deploy-clickhouse.sh up
+
+# 2. Check individual service status
+./k8s/scripts/services/deploy-redis.sh status
+
+# 3. Stream logs from a specific service
+./k8s/scripts/services/deploy-otel-collector.sh logs -f
+
+# 4. Perform targeted readiness probe health check
+./k8s/scripts/services/deploy-tempo.sh health
+
+# 5. Port-forward a single service to localhost
+./k8s/scripts/services/deploy-grafana.sh port-forward 3000
+
+# 6. Perform a zero-downtime rolling restart of an individual deployment
+./k8s/scripts/services/deploy-temporal.sh restart
+
+# 7. Stop / teardown an individual service
+./k8s/scripts/services/deploy-alloydb.sh down
+
+# 8. Manage Argo Rollouts Canary lifecycle
+./k8s/scripts/services/deploy-canary-rollout.sh up
+./k8s/scripts/services/deploy-canary-rollout.sh promote
+./k8s/scripts/services/deploy-canary-rollout.sh abort
+./k8s/scripts/services/deploy-canary-rollout.sh retry
+```
+
+### 12.3 Master Orchestrator CLI (`manage.sh`)
+
+For cluster-wide orchestration, `k8s/scripts/manage.sh` coordinates operations across all services or targets specific components:
+
+```bash
+# Deploy all services in topological order (Foundations -> Storage -> Core DBs -> Telemetry -> Workflows -> Apps)
+./k8s/scripts/manage.sh up all
+
+# Deploy a single service via the master CLI
+./k8s/scripts/manage.sh up kafka
+
+# Display complete cluster overview (Deployments, Rollouts, Pods, Services, PVCs)
+./k8s/scripts/manage.sh status all
+
+# Run comprehensive health inspection across all services
+./k8s/scripts/manage.sh health all
+
+# Background port-forward all platform services to local host ports
+./k8s/scripts/manage.sh port-forward all
+
+# Terminate all active background port forwards
+./k8s/scripts/manage.sh port-forward stop
+
+# Gracefully teardown all application workloads (preserves PVC data)
+./k8s/scripts/manage.sh down all
+
+# Complete teardown including PVC storage purge
+./k8s/scripts/manage.sh teardown all --purge-storage
+```
+
