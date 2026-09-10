@@ -521,17 +521,11 @@ sequenceDiagram
 
 Every container running within the `llm-obs-infra` cluster adheres to the Open Container Initiative (OCI) image specification. When kubelet schedules a pod to a node, the container runtime (containerd) performs layer-by-layer digest verification against the local content store (`/var/lib/containerd/io.containerd.content.v1.content`).
 
-```
-+-----------------------------------------------------------------------------------------------+
-|                                    OCI IMAGE LAYER ANATOMY                                    |
-+-----------------------------------------------------------------------------------------------+
-| Layer 3: Application Binaries & Configuration (/etc/service-registry/config.json) [12 MB]   |
-+-----------------------------------------------------------------------------------------------+
-| Layer 2: Runtime Dependencies & Shared Dynamic Libraries (libssl.so, musl, ca-certs) [18 MB] |
-+-----------------------------------------------------------------------------------------------+
-| Layer 1: Base Operating System Rootfs (Alpine Linux 3.20 minimal rootfs) [3.2 MB]            |
-+-----------------------------------------------------------------------------------------------+
-```
+| Image Layer | Contents & Description | Size Footprint |
+|---|---|---|
+| **Layer 3 (Application)** | Application Binaries & Configuration (`/etc/service-registry/config.json`) | ~12 MB |
+| **Layer 2 (Dependencies)** | Runtime Dependencies & Shared Dynamic Libraries (`libssl.so`, `musl`, `ca-certificates`) | ~18 MB |
+| **Layer 1 (Base OS Rootfs)** | Alpine Linux 3.20 minimal base root filesystem | ~3.2 MB |
 
 ### 3.2 Image Digest Immutability vs Tag Mutation
 
@@ -553,18 +547,14 @@ image: google/alloydbomni:15@sha256:d82f7c1b59a9307d03a116bfa8a34bc3d67bc8255be1
 
 When Kubernetes starts a pod, it constructs isolated kernel namespaces and applies cgroup controllers:
 
-```
-+-------------------+---------------------------------------------------------------------------+
-| Linux Namespace   | Isolation Boundary Provided                                               |
-+-------------------+---------------------------------------------------------------------------+
-| `mnt` (Mount)     | Isolates filesystem mount points. The container cannot see host storage.  |
-| `pid` (Process)   | Process tree virtualization. Container entrypoint becomes PID 1.          |
-| `net` (Network)   | Independent virtual network stack (IP address, routing table, iptables).  |
-| `ipc` (Inter-Proc)| System V IPC and POSIX message queue isolation.                           |
-| `uts` (Hostname)  | Virtualized hostname and domain name.                                     |
-| `user` (User IDs) | Maps container UID/GID to unprivileged host UID/GID ranges.               |
-+-------------------+---------------------------------------------------------------------------+
-```
+| Linux Namespace | Kernel Isolation Boundary Provided |
+|---|---|
+| `mnt` (Mount) | Isolates filesystem mount points. The container cannot inspect or access host storage mounts. |
+| `pid` (Process) | Process tree virtualization. The container entrypoint process is isolated as PID 1. |
+| `net` (Network) | Independent virtual network stack (isolated IP address, local loopback, routing table, iptables). |
+| `ipc` (Inter-Process) | System V IPC and POSIX message queue isolation between containers and host. |
+| `uts` (Hostname) | Virtualized hostname and NIS domain name for the pod. |
+| `user` (User IDs) | Maps container root/non-root UID and GID ranges to unprivileged host UID/GID ranges. |
 
 ### 4.2 Restricting Kernel Capabilities (`capabilities.drop: ["ALL"]`)
 
@@ -744,17 +734,13 @@ For complete architectural details, sequence diagrams, state machines, and analy
 
 ### 11.1 Diagnostic Triage Decision Matrix
 
-```
-+-------------------------------+---------------------------------------+-------------------------------------------------------+
-| Error Status                  | Underlying Root Cause                 | Exact Immediate Remediation Command                   |
-+-------------------------------+---------------------------------------+-------------------------------------------------------+
-| `CrashLoopBackOff`            | Container exit code > 0 (bad config)  | `kubectl logs <pod> -n llmobs --previous`             |
-| `ImagePullBackOff`            | Missing image tag or auth failure     | `kubectl describe pod <pod> -n llmobs | grep Events`   |
-| `OOMKilled` (Exit 137)        | Memory consumption > limits.memory    | Increase `resources.limits.memory` in manifest        |
-| `CreateContainerConfigError`  | Missing ConfigMap or Secret reference | `kubectl get configmap,secret -n llmobs`              |
-| `FailedMount`                 | PVC unattached or StorageClass error  | `kubectl describe pvc <claim> -n llmobs`              |
-+-------------------------------+---------------------------------------+-------------------------------------------------------+
-```
+| Error Status | Underlying Root Cause | Exact Immediate Remediation Command |
+|---|---|---|
+| `CrashLoopBackOff` | Container exit code > 0 (configuration error or panic) | `kubectl logs <pod> -n llmobs --previous` |
+| `ImagePullBackOff` | Missing image tag, registry rate limit, or auth failure | `kubectl describe pod <pod> -n llmobs \| grep Events` |
+| `OOMKilled` (Exit 137) | Memory consumption exceeded `limits.memory` cgroup | Increase `resources.limits.memory` in deployment manifest |
+| `CreateContainerConfigError` | Missing referenced ConfigMap or Secret | `kubectl get configmap,secret -n llmobs` |
+| `FailedMount` | PVC unattached, StorageClass error, or node mismatch | `kubectl describe pvc <claim> -n llmobs` |
 
 ### 11.2 Emergency Production Commands
 

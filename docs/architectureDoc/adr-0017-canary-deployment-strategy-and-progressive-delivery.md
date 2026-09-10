@@ -33,23 +33,11 @@ To mitigate this risk and enforce zero-downtime reliability, this architecture i
 
 Prior to this decision, the `llm-obs-infra` platform operated under significant deployment vulnerabilities:
 
-```
-+-----------------------------------------------------------------------------------------------+
-|                                    HISTORICAL DEPLOYMENT RISKS                                |
-+------------------------------------+----------------------------------------------------------+
-| Deployment Mechanism               | Failure Vector / Operational Impact                      |
-+------------------------------------+----------------------------------------------------------+
-| Docker Compose Recreate            | 100% traffic hit immediately. Service downtime during     |
-| (manage.sh / docker-compose.yml)   | container pull/restart. No gradual validation.           |
-+------------------------------------+----------------------------------------------------------+
-| Standard K8s RollingUpdate         | New pods receive traffic the instant readiness passes.   |
-| (maxSurge=1, maxUnavailable=0)     | Subtle bugs (e.g. memory leaks, slow queries, deadlocks) |
-|                                    | propagate cluster-wide before engineers can react.       |
-+------------------------------------+----------------------------------------------------------+
-| Manual Validation                  | Engineers manually curl endpoints or inspect Grafana     |
-|                                    | logs; high human error rate and slow reaction (>15 min). |
-+------------------------------------+----------------------------------------------------------+
-```
+| Deployment Mechanism | Failure Vector / Operational Impact |
+|---|---|
+| **Docker Compose Recreate**<br>(`manage.sh` / `docker-compose.yml`) | 100% traffic hit immediately. Service downtime during container pull/restart. No gradual validation. |
+| **Standard K8s RollingUpdate**<br>(`maxSurge=1`, `maxUnavailable=0`) | New pods receive traffic the instant readiness passes. Subtle bugs (e.g. memory leaks, slow queries, deadlocks) propagate cluster-wide before engineers can react. |
+| **Manual Validation** | Engineers manually curl endpoints or inspect Grafana logs; high human error rate and slow reaction (>15 min). |
 
 ### Key Engineering Constraints:
 - **Telemetry Loss Is Unacceptable**: An outage in `service-registry-api`, `opentelemetry-collector`, or `traefik-ingress-gateway` blinds observability across all upstream LLM applications.
@@ -622,27 +610,12 @@ kubectl argo rollouts dashboard -n llmobs --port 3100
 
 ## 7. Consequences, Trade-offs & Engineering Mitigations
 
-```
-+------------------------------------+----------------------------------------------------------+
-| Architectural Advantage / Benefit  | Engineering Trade-off & Operational Mitigation           |
-+------------------------------------+----------------------------------------------------------+
-| 1. Bounded Blast Radius (5% Limit) | Minimal Extra Pod Capacity: Canary requires 1 extra pod  |
-| Regressions affect at most 1 in 20 | during rollout (+32Mi to +128Mi RAM). Easily accommodated|
-| requests before detection.         | within existing node cgroup headrooms.                   |
-+------------------------------------+----------------------------------------------------------+
-| 2. Sub-5-Second Emergency Rollback | Database Schema Backward Compatibility: Canary code runs |
-| Zero container rebuilds or network | concurrently with stable code against the same DB.       |
-| redeployments during incident.     | Requires Expand-and-Contract DB migration discipline.     |
-+------------------------------------+----------------------------------------------------------+
-| 3. Quantitative Metric Gating      | Prometheus Scraping Sensitivity: Metric lag (>15s) can  |
-| Promotion driven by math (P99,     | delay aborts. Mitigated by 120-second pause windows      |
-| 5xx ratios) rather than gut feel.  | ensuring sufficient metric samples accumulate.           |
-+------------------------------------+----------------------------------------------------------+
-| 4. Stateless Microservice Focus    | Not Applicable to Databases: Stateful engines (AlloyDB,  |
-| Shields sensitive data storage     | ClickHouse, Kafka) must continue using Recreate strategy |
-| from dual-writer split-brain risks.| to preserve volume block integrity.                      |
-+------------------------------------+----------------------------------------------------------+
-```
+| Architectural Advantage / Benefit | Engineering Trade-off & Operational Mitigation |
+|---|---|
+| **1. Bounded Blast Radius (5% Limit)**<br>Regressions affect at most 1 in 20 requests before detection. | **Minimal Extra Pod Capacity**: Canary requires 1 extra pod during rollout (+32Mi to +128Mi RAM). Easily accommodated within existing node cgroup headrooms. |
+| **2. Sub-5-Second Emergency Rollback**<br>Zero container rebuilds or network redeployments during incident. | **Database Schema Backward Compatibility**: Canary code runs concurrently with stable code against the same DB. Requires Expand-and-Contract DB migration discipline. |
+| **3. Quantitative Metric Gating**<br>Promotion driven by math (P99, 5xx ratios) rather than gut feel. | **Prometheus Scraping Sensitivity**: Metric lag (>15s) can delay aborts. Mitigated by 120-second pause windows ensuring sufficient metric samples accumulate. |
+| **4. Stateless Microservice Focus**<br>Shields sensitive data storage from dual-writer split-brain risks. | **Not Applicable to Databases**: Stateful engines (AlloyDB, ClickHouse, Kafka) must continue using `Recreate` strategy to preserve volume block integrity. |
 
 ### 7.1 The Expand and Contract Pattern for Database Migrations
 
