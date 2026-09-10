@@ -11,7 +11,7 @@ free_single_port() {
   local port=$1
   if command -v lsof >/dev/null 2>&1; then
     local pids
-    pids=$(lsof -t -i:"${port}" 2>/dev/null || true)
+    pids=$(timeout 2s lsof -t -i:"${port}" 2>/dev/null || true)
     if [ -n "$pids" ]; then
       for pid in $pids; do
         if grep -qE "docker|containerd|llmobs" "/proc/${pid}/cgroup" 2>/dev/null || grep -qE "docker|containerd|llmobs" "/proc/${pid}/cmdline" 2>/dev/null; then
@@ -23,7 +23,7 @@ free_single_port() {
       done
     fi
   elif command -v fuser >/dev/null 2>&1; then
-    fuser -k "${port}/tcp" >/dev/null 2>&1 || true
+    timeout 2s fuser -k "${port}/tcp" >/dev/null 2>&1 || true
   fi
 }
 

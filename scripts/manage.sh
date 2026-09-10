@@ -114,9 +114,10 @@ execute_restart_pipeline() {
 execute_down_pipeline() {
   local bin=$1
   local compose_file=$2
+  shift 2 || true
 
-  echo -e "${BLUE}[frontend-deployment] Stopping infrastructure stack...${NC}"
-  $bin -f "$compose_file" down
+  echo -e "${BLUE}[frontend-deployment] Stopping infrastructure stack across all profiles...${NC}"
+  $bin -f "$compose_file" --profile "*" down "$@"
   echo -e "${GREEN}✓ All services stopped.${NC}"
 }
 

@@ -1,1 +1,140 @@
-http: {}
+http:
+    routers:
+        alloydb-discovery-router:
+            rule: Host(`alloydb.llmobs.local`)
+            service: alloydb-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+        clickhouse-discovery-router:
+            rule: Host(`clickhouse.llmobs.local`)
+            service: clickhouse-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+        grafana-discovery-router:
+            rule: Host(`grafana.llmobs.local`)
+            service: grafana-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+        kafka-discovery-router:
+            rule: Host(`kafka.llmobs.local`)
+            service: kafka-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+        otel-collector-discovery-router:
+            rule: Host(`otel-collector.llmobs.local`)
+            service: otel-collector-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+        redis-discovery-router:
+            rule: Host(`redis.llmobs.local`)
+            service: redis-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+        tempo-discovery-router:
+            rule: Host(`tempo.llmobs.local`)
+            service: tempo-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+        temporal-discovery-router:
+            rule: Host(`temporal.llmobs.local`)
+            service: temporal-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+        traefik-discovery-router:
+            rule: Host(`traefik.llmobs.local`)
+            service: traefik-discovery-svc
+            entryPoints:
+                - websecure
+            tls: {}
+            middlewares:
+                - security-headers@file
+                - rate-limit@file
+    services:
+        alloydb-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: tcp://localhost:31420
+        clickhouse-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: http://localhost:31421
+                healthCheck:
+                    path: /ping
+                    interval: 10s
+                    timeout: 3s
+        grafana-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: http://localhost:31415
+                healthCheck:
+                    path: /api/health
+                    interval: 10s
+                    timeout: 3s
+        kafka-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: tcp://localhost:31414
+        otel-collector-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: http://localhost:31417
+                healthCheck:
+                    path: /
+                    interval: 10s
+                    timeout: 3s
+        redis-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: tcp://localhost:31413
+        tempo-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: http://localhost:31416
+                healthCheck:
+                    path: /ready
+                    interval: 10s
+                    timeout: 3s
+        temporal-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: tcp://localhost:31424
+        traefik-discovery-svc:
+            loadBalancer:
+                servers:
+                    - url: http://localhost:31410
+                healthCheck:
+                    path: /api/overview
+                    interval: 10s
+                    timeout: 3s

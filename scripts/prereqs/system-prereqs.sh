@@ -50,8 +50,8 @@ verify_kernel_sysctls() {
   current_map_count=$(sysctl -n vm.max_map_count 2>/dev/null || echo "65530")
 
   if [ "$current_map_count" -lt 262144 ]; then
-    echo -e "${YELLOW}⚠️ Warning: vm.max_map_count is low (${current_map_count}). Raising to 262144 for Kafka mmap...${NC}"
-    sudo sysctl -w vm.max_map_count=262144 >/dev/null 2>&1 || echo -e "${YELLOW}⚠️ Could not raise vm.max_map_count.${NC}"
+    echo -e "${YELLOW}⚠️ Warning: vm.max_map_count is low (${current_map_count}). Attempting non-interactive sysctl raise...${NC}"
+    sudo -n sysctl -w vm.max_map_count=262144 >/dev/null 2>&1 || echo -e "${YELLOW}⚠️ Could not automatically raise vm.max_map_count without sudo permissions.${NC}"
   else
     echo -e "${GREEN}✓ Kernel vm.max_map_count verified (${current_map_count}).${NC}"
   fi
@@ -82,10 +82,10 @@ verify_clock_sync() {
 verify_firewall_rules() {
   if command -v ufw >/dev/null 2>&1; then
     local ufw_status
-    ufw_status=$(sudo ufw status 2>/dev/null | grep -i "Status: active" || echo "")
+    ufw_status=$(sudo -n ufw status 2>/dev/null | grep -i "Status: active" || echo "")
     if [ -n "$ufw_status" ]; then
       echo -e "${YELLOW}⚠️ Warning: UFW Firewall active. Ensuring docker bridge interface pass-through...${NC}"
-      sudo ufw allow in on llmobs-network to any >/dev/null 2>&1 || true
+      sudo -n ufw allow in on llmobs-network to any >/dev/null 2>&1 || true
     fi
   fi
 }
