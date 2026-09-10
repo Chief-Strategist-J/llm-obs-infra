@@ -38,14 +38,30 @@ wait_with_backoff() {
   return 1
 }
 
+map_to_container_name() {
+  case "$1" in
+    llmobs-alloydb) echo "llmobs-alloydb-db" ;;
+    llmobs-redis) echo "llmobs-redis-ledger" ;;
+    llmobs-kafka) echo "llmobs-kafka-broker" ;;
+    llmobs-clickhouse) echo "llmobs-clickhouse-analytics" ;;
+    llmobs-tempo) echo "llmobs-tempo-tracing" ;;
+    llmobs-grafana) echo "llmobs-grafana-portal" ;;
+    llmobs-traefik) echo "llmobs-traefik-gateway" ;;
+    llmobs-temporal) echo "llmobs-temporal-engine" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 check_service_health() {
   local service_name=$1
+  local container_name
+  container_name=$(map_to_container_name "$service_name")
 
   # Check container status
-  local inspect_cmd="docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' '$service_name' 2>/dev/null | grep -q 'healthy\|running'"
+  local inspect_cmd="docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' '$container_name' 2>/dev/null | grep -q 'healthy\|running'"
 
   if ! wait_with_backoff "$inspect_cmd" 5 1 5; then
-    echo -e "${YELLOW}⚠️  Container ${service_name} status check warning.${NC}"
+    echo -e "${YELLOW}⚠️  Container ${container_name} status check warning.${NC}"
     return 0
   fi
 
