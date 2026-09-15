@@ -32,6 +32,70 @@ log_error() {
   echo -e "${RED}${BOLD}[ERROR]${NC} $1" >&2
 }
 
+create_local_cluster() {
+  local mode="${1:-ensure}"
+  log_info "Attempting to launch or connect to a local Kubernetes cluster (mode: ${mode})..."
+
+  if command -v kind >/dev/null 2>&1; then
+    if kind get clusters 2>/dev/null | grep -q "^llmobs-cluster$"; then
+      if [ "${mode}" = "recreate" ] || [ "${mode}" = "--recreate" ] || [ "${mode}" = "--force" ]; then
+        log_warn "Existing 'kind' cluster 'llmobs-cluster' found. Deleting and recreating fresh cluster..."
+        kind delete cluster --name llmobs-cluster
+        log_info "Provisioning new 'kind' cluster ('llmobs-cluster')..."
+        kind create cluster --name llmobs-cluster
+      else
+        log_info "Cluster 'llmobs-cluster' already exists. Switching kubectl context to 'kind-llmobs-cluster'..."
+        kubectl config use-context kind-llmobs-cluster 2>/dev/null || true
+      fi
+    else
+      log_info "Detected 'kind' (Kubernetes-in-Docker). Provisioning new cluster 'llmobs-cluster'..."
+      kind create cluster --name llmobs-cluster
+    fi
+    log_success "Local 'kind' cluster ('llmobs-cluster') is active and ready."
+    return 0
+  elif command -v minikube >/dev/null 2>&1; then
+    if [ "${mode}" = "recreate" ] || [ "${mode}" = "--recreate" ] || [ "${mode}" = "--force" ]; then
+      log_warn "Deleting existing minikube cluster for fresh recreation..."
+      minikube delete 2>/dev/null || true
+    fi
+    log_info "Detected 'minikube'. Starting local minikube cluster..."
+    minikube start
+    log_success "Local 'minikube' cluster started successfully."
+    return 0
+  elif command -v k3d >/dev/null 2>&1; then
+    if [ "${mode}" = "recreate" ] || [ "${mode}" = "--recreate" ] || [ "${mode}" = "--force" ]; then
+      log_warn "Deleting existing k3d cluster 'llmobs-cluster'..."
+      k3d cluster delete llmobs-cluster 2>/dev/null || true
+    fi
+    log_info "Detected 'k3d'. Creating cluster 'llmobs-cluster'..."
+    k3d cluster create llmobs-cluster 2>/dev/null || true
+    log_success "Local 'k3d' cluster created successfully."
+    return 0
+  else
+    log_error "No local Kubernetes provider (kind, minikube, or k3d) found."
+    log_info "To install 'kind' locally (recommended):"
+    log_info "  curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/"
+    log_info "Or start Docker Desktop / OrbStack / Minikube."
+    return 1
+  fi
+}
+
+delete_local_cluster() {
+  log_info "Tearing down local Kubernetes cluster..."
+  if command -v kind >/dev/null 2>&1 && kind get clusters 2>/dev/null | grep -q "^llmobs-cluster$"; then
+    kind delete cluster --name llmobs-cluster
+    log_success "Local 'kind' cluster 'llmobs-cluster' deleted."
+  elif command -v minikube >/dev/null 2>&1; then
+    minikube delete
+    log_success "Minikube cluster deleted."
+  elif command -v k3d >/dev/null 2>&1; then
+    k3d cluster delete llmobs-cluster 2>/dev/null || true
+    log_success "Local 'k3d' cluster deleted."
+  else
+    log_warn "No recognized local cluster found to delete."
+  fi
+}
+
 check_kubectl() {
   if ! command -v kubectl >/dev/null 2>&1; then
     log_error "kubectl command not found. Please install kubectl to manage Kubernetes resources."
@@ -39,8 +103,12 @@ check_kubectl() {
   fi
 
   if ! kubectl cluster-info >/dev/null 2>&1; then
-    log_error "Cannot connect to Kubernetes cluster. Ensure kubeconfig is active and cluster is running."
-    exit 1
+    log_warn "Cannot connect to an active Kubernetes cluster."
+    log_info "Automatically attempting to provision a local cluster..."
+    if ! create_local_cluster; then
+      log_error "Failed to establish or provision a Kubernetes cluster connection."
+      exit 1
+    fi
   fi
 }
 

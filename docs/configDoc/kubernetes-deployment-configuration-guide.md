@@ -846,10 +846,37 @@ For cluster-wide orchestration, `k8s/scripts/manage.sh` coordinates operations a
 # Terminate all active background port forwards
 ./k8s/scripts/manage.sh port-forward stop
 
-# Gracefully teardown all application workloads (preserves PVC data)
+# 8. Gracefully teardown all application workloads (preserves PVC data)
 ./k8s/scripts/manage.sh down all
 
-# Complete teardown including PVC storage purge
+# 9. Complete teardown including PVC storage purge
 ./k8s/scripts/manage.sh teardown all --purge-storage
 ```
+
+---
+
+### 12.4 Local Kubernetes Cluster Provisioning & Cluster Service Catalog
+
+For local development and testing, the operational toolchain automatically detects if an active Kubernetes cluster is reachable. If no cluster is active, `manage.sh` auto-provisions a local cluster using lightweight local engines (`kind`, `minikube`, or `k3d`).
+
+| Command | Provider Options | System Action | Primary Use Case |
+|---|---|---|---|
+| `./k8s/scripts/manage.sh create-cluster` | `kind`, `minikube`, `k3d` | Connects if cluster `llmobs-cluster` exists; auto-provisions new cluster if missing. | First-time setup or resuming daily local development. |
+| `./k8s/scripts/manage.sh recreate-cluster` | `kind`, `minikube`, `k3d` | Deletes existing local cluster `llmobs-cluster` and creates a fresh cluster from scratch. | Recovering from broken cluster state or clean slate testing. |
+| `./k8s/scripts/manage.sh delete-cluster` | `kind`, `minikube`, `k3d` | Tears down and purges the local development cluster (`llmobs-cluster`). | Releasing host RAM/CPU resources when dev session completes. |
+
+#### Cluster Service Definitions & Port Catalog
+
+| Service Key | Workload Name | Resource Kind | Default Container Port | Internal DNS Endpoint | Persistent Volume |
+|---|---|---|---|---|---|
+| `alloydb` | `llmobs-alloydb-db` | Deployment (Recreate) | `5432/TCP` | `llmobs-alloydb-db.llmobs.svc.cluster.local` | `alloydb-data-pvc` (20Gi) |
+| `clickhouse` | `llmobs-clickhouse-analytics` | Deployment (Recreate) | `8123/TCP`, `9000/TCP` | `llmobs-clickhouse-analytics.llmobs.svc.cluster.local` | `clickhouse-data-pvc` (50Gi) |
+| `redis` | `llmobs-redis-ledger` | Deployment (RollingUpdate) | `6379/TCP` | `llmobs-redis-ledger.llmobs.svc.cluster.local` | Ephemeral |
+| `kafka` | `llmobs-kafka-broker` | Deployment (Recreate) | `9092/TCP` | `llmobs-kafka-broker.llmobs.svc.cluster.local` | `kafka-data-pvc` (20Gi) |
+| `tempo` | `llmobs-tempo-tracing` | Deployment (Recreate) | `3200/TCP`, `4317/TCP` | `llmobs-tempo-tracing.llmobs.svc.cluster.local` | `tempo-data-pvc` (20Gi) |
+| `otel` | `llmobs-otel-collector` | Deployment (RollingUpdate) | `4317/TCP`, `4318/TCP` | `llmobs-otel-collector.llmobs.svc.cluster.local` | Ephemeral |
+| `grafana` | `llmobs-grafana-portal` | Deployment (RollingUpdate) | `3000/TCP` | `llmobs-grafana-portal.llmobs.svc.cluster.local` | `grafana-data-pvc` (5Gi) |
+| `temporal` | `llmobs-temporal-engine` | Deployment (RollingUpdate) | `7233/TCP` | `llmobs-temporal-engine.llmobs.svc.cluster.local` | Ephemeral (Backed by AlloyDB) |
+| `canary` | `llmobs-canary-rollout` | Argo Rollout (Canary 5/95) | `31426/TCP` | `llmobs-service-registry.llmobs.svc.cluster.local` | Ephemeral |
+
 

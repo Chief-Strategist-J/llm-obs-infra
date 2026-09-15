@@ -146,15 +146,24 @@ case "${COMMAND}" in
   teardown)
     "${SCRIPT_DIR}/teardown-cluster.sh" "$@"
     ;;
+  create-cluster|cluster-create)
+    create_local_cluster "ensure" "$@"
+    ;;
+  recreate-cluster|cluster-recreate)
+    create_local_cluster "recreate" "$@"
+    ;;
+  delete-cluster|cluster-delete)
+    delete_local_cluster "$@"
+    ;;
   help|--help|-h)
-    echo "Usage: $0 {up [service|all]|down [service|all]|restart [service|all]|status [service|all]|logs <service>|health [service|all]|port-forward <service|all|stop>|bootstrap|teardown}"
+    echo "Usage: $0 {up [service|all]|down [service|all]|restart [service|all]|status [service|all]|logs <service>|health [service|all]|port-forward <service|all|stop>|create-cluster|recreate-cluster|delete-cluster|bootstrap|teardown}"
     echo ""
     echo "Services: $(get_all_services)"
     exit 0
     ;;
   *)
     log_error "Unknown command: ${COMMAND}"
-    echo "Usage: $0 {up|down|restart|status|logs|health|port-forward|bootstrap|teardown} [options]"
+    echo "Usage: $0 {up|down|restart|status|logs|health|port-forward|create-cluster|recreate-cluster|delete-cluster|bootstrap|teardown} [options]"
     exit 1
     ;;
 esac

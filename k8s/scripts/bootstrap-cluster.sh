@@ -7,6 +7,7 @@ source "${SCRIPT_DIR}/common.sh"
 
 SKIP_STORAGE=false
 WAIT_FOR_PVCS=false
+CREATE_CLUSTER=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,8 +19,12 @@ while [[ $# -gt 0 ]]; do
       WAIT_FOR_PVCS=true
       shift
       ;;
+    --create-cluster)
+      CREATE_CLUSTER=true
+      shift
+      ;;
     --help|-h)
-      echo "Usage: $0 [--skip-storage] [--wait]"
+      echo "Usage: $0 [--create-cluster] [--skip-storage] [--wait]"
       exit 0
       ;;
     *)
@@ -28,6 +33,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [ "${CREATE_CLUSTER}" = true ]; then
+  create_local_cluster
+fi
 
 check_kubectl
 
