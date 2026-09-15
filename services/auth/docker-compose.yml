@@ -8,15 +8,16 @@ services:
   auth-service-db:
     image: google/alloydbomni:15
     container_name: auth-service-db
+    profiles: ["auth", "db", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
       resources:
         limits:
-          memory: 2048M
+          memory: 3072M
           cpus: "2.0"
         reservations:
-          memory: 512M
+          memory: 1024M
           cpus: "0.5"
     ports:
       - "${PORT_ALLOYDB:-5432}:5432"
@@ -36,7 +37,12 @@ services:
       - "--"
     command:
       - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
     volumes:
+      - ../../config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ../../config/alloydb/security-audit.sql:/docker-entrypoint-initdb.d/10-security-audit.sql:ro
+      - ../../config/alloydb/init-extensions.sql:/docker-entrypoint-initdb.d/20-init-extensions.sql:ro
       - auth_db_data:/var/lib/postgresql/data
       - auth_db_archive:/var/lib/postgresql/archive
     networks:
@@ -53,6 +59,7 @@ services:
   llmobs-redis-ledger:
     image: redis:7-alpine
     container_name: llmobs-redis-ledger
+    profiles: ["auth", "db", "full"]
     restart: unless-stopped
     logging: *default-logging
     command: >
@@ -79,6 +86,7 @@ services:
   llmobs-kafka-broker:
     image: apache/kafka:latest
     container_name: llmobs-kafka-broker
+    profiles: ["auth", "streaming", "full"]
     restart: unless-stopped
     logging: *default-logging
     ulimits:
@@ -116,7 +124,7 @@ services:
         aliases:
           - llmobs-kafka-broker
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 > /dev/null 2>&1 || nc -z 127.0.0.1 9092"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 9092 || /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 > /dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -125,6 +133,7 @@ services:
   llmobs-otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: llmobs-otel-collector
+    profiles: ["auth", "tracing", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
@@ -139,6 +148,7 @@ services:
       - GOMEMLIMIT=858993459
     volumes:
       - ../../config/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - ../../config/certs:/etc/otel-collector/certs:ro
     ports:
       - "${PORT_OTEL_HTTP:-4318}:4318"
       - "${PORT_OTEL_GRPC:-4317}:4317"
@@ -146,16 +156,11 @@ services:
       llmobs-auth-network:
         aliases:
           - llmobs-otel-collector
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --spider http://localhost:13133/ || nc -z 127.0.0.1 4318"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
 
   llmobs-service-registry:
     image: chiefj/llmobs-service-registry:latest
     container_name: llmobs-service-registry
+    profiles: ["auth", "network", "full"]
     restart: always
     logging: *default-logging
     deploy:

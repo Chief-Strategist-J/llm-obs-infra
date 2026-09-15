@@ -38,26 +38,26 @@ case "${1:-up}" in
   up)
     ensure_env
     echo -e "${BLUE}Launching Auth Service Stack (Database, Redis, Kafka, OTel, Service Registry)...${NC}"
-    $BIN -f "$COMPOSE_FILE" up -d
+    $BIN -f "$COMPOSE_FILE" --profile auth up -d
     echo -e "${GREEN}✓ Auth stack container deployment initiated.${NC}"
     bash "$SCRIPT_DIR/health-check.sh" || true
     ;;
   down)
     echo -e "${BLUE}Stopping Auth Service Stack...${NC}"
-    $BIN -f "$COMPOSE_FILE" down
+    $BIN -f "$COMPOSE_FILE" --profile auth down
     echo -e "${GREEN}✓ Auth stack stopped.${NC}"
     ;;
   restart)
     echo -e "${BLUE}Restarting Auth Service Stack...${NC}"
-    $BIN -f "$COMPOSE_FILE" restart
+    $BIN -f "$COMPOSE_FILE" --profile auth restart
     bash "$SCRIPT_DIR/health-check.sh" || true
     ;;
   status|ps)
-    $BIN -f "$COMPOSE_FILE" ps
+    $BIN -f "$COMPOSE_FILE" --profile auth ps
     ;;
   logs)
     shift || true
-    $BIN -f "$COMPOSE_FILE" logs -f "$@"
+    $BIN -f "$COMPOSE_FILE" --profile auth logs -f "$@"
     ;;
   health)
     bash "$SCRIPT_DIR/health-check.sh"

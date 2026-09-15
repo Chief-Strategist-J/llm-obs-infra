@@ -38,26 +38,26 @@ case "${1:-up}" in
   up)
     ensure_env
     echo -e "${BLUE}Launching Audit Service Stack (Database, Redis, Kafka, OTel, Service Registry)...${NC}"
-    $BIN -f "$COMPOSE_FILE" up -d
+    $BIN -f "$COMPOSE_FILE" --profile audit up -d
     echo -e "${GREEN}✓ Audit stack container deployment initiated.${NC}"
     bash "$SCRIPT_DIR/health-check.sh" || true
     ;;
   down)
     echo -e "${BLUE}Stopping Audit Service Stack...${NC}"
-    $BIN -f "$COMPOSE_FILE" down
+    $BIN -f "$COMPOSE_FILE" --profile audit down
     echo -e "${GREEN}✓ Audit stack stopped.${NC}"
     ;;
   restart)
     echo -e "${BLUE}Restarting Audit Service Stack...${NC}"
-    $BIN -f "$COMPOSE_FILE" restart
+    $BIN -f "$COMPOSE_FILE" --profile audit restart
     bash "$SCRIPT_DIR/health-check.sh" || true
     ;;
   status|ps)
-    $BIN -f "$COMPOSE_FILE" ps
+    $BIN -f "$COMPOSE_FILE" --profile audit ps
     ;;
   logs)
     shift || true
-    $BIN -f "$COMPOSE_FILE" logs -f "$@"
+    $BIN -f "$COMPOSE_FILE" --profile audit logs -f "$@"
     ;;
   health)
     bash "$SCRIPT_DIR/health-check.sh"

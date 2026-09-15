@@ -8,15 +8,16 @@ services:
   payment-service-db:
     image: google/alloydbomni:15
     container_name: payment-service-db
+    profiles: ["payment", "db", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
       resources:
         limits:
-          memory: 2048M
+          memory: 3072M
           cpus: "2.0"
         reservations:
-          memory: 512M
+          memory: 1024M
           cpus: "0.5"
     ports:
       - "${PORT_PAYMENT_DB:-5433}:5432"
@@ -36,7 +37,12 @@ services:
       - "--"
     command:
       - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
     volumes:
+      - ../../config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ../../config/alloydb/security-audit.sql:/docker-entrypoint-initdb.d/10-security-audit.sql:ro
+      - ../../config/alloydb/init-extensions.sql:/docker-entrypoint-initdb.d/20-init-extensions.sql:ro
       - payment_db_data:/var/lib/postgresql/data
       - payment_db_archive:/var/lib/postgresql/archive
     networks:
@@ -53,6 +59,7 @@ services:
   payment-redis-ledger:
     image: redis:7-alpine
     container_name: payment-redis-ledger
+    profiles: ["payment", "db", "full"]
     restart: unless-stopped
     logging: *default-logging
     command: >
@@ -79,6 +86,7 @@ services:
   payment-kafka-broker:
     image: apache/kafka:latest
     container_name: payment-kafka-broker
+    profiles: ["payment", "streaming", "full"]
     restart: unless-stopped
     logging: *default-logging
     ulimits:
@@ -125,6 +133,7 @@ services:
   payment-otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: payment-otel-collector
+    profiles: ["payment", "tracing", "full"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
@@ -146,16 +155,11 @@ services:
       llmobs-payment-network:
         aliases:
           - payment-otel-collector
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --spider http://localhost:13133/ || nc -z 127.0.0.1 4318"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
 
   payment-service-registry:
     image: chiefj/llmobs-service-registry:latest
     container_name: payment-service-registry
+    profiles: ["payment", "network", "full"]
     restart: always
     logging: *default-logging
     deploy:
