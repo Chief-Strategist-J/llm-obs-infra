@@ -22,6 +22,7 @@ Each audit report is stored in its own dedicated, version-controlled markdown do
 |---|---|---|---|---|---|---|
 | AUD-0006 | ADR-0006 Resilience & Hardening | 3 Critical, 4 High, 6 Medium, 4 Low | [independent-audit-adr-0006.md](./complete/independent-audit-adr-0006.md) | [remediation-plan-adr-0006.md](./complete/remediation-plan-adr-0006.md) | Complete / Remediated | `complete/` |
 | AUD-0007 | `llm-obs-infra` Deployment Configuration (compose, service configs, operational scripts) | 12 Critical, 12 High, 10 Medium, 5 Low | [independent-audit-infra-deployment-config.md](./pending/independent-audit-infra-deployment-config.md) | [remediation-plan-infra-deployment-config.md](./pending/remediation-plan-infra-deployment-config.md) | **Open — Deployment Blocked** | `pending/` |
+| AUD-0008 | `llm-obs-infra` Kubernetes Architecture & Network Security (`k8s/` manifests, networking, security controls) | 2 Critical, 2 High, 2 Medium, 1 Low | [independent-audit-k8s-network-security.md](./pending/independent-audit-k8s-network-security.md) | [remediation-plan-k8s-network-security.md](./pending/remediation-plan-k8s-network-security.md) | **Open — Remediation Required** | `pending/` |
 
 ---
 
