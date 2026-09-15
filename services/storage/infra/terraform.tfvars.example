@@ -1,0 +1,11 @@
+gcp_project_id = "your-gcp-project-id"
+gcp_region     = "us-central1"
+gcp_zone       = "us-central1-a"
+
+vpc_name    = "llmobs-storage-vpc"
+subnet_cidr = "10.0.50.0/24"
+
+instance_name = "llmobs-storage-node"
+machine_type  = "e2-standard-4"
+
+allowed_source_ranges = ["0.0.0.0/0"]
