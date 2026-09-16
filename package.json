@@ -9,6 +9,7 @@
     "down": "./scripts/manage.sh down",
     "status": "./scripts/manage.sh status",
     "health": "./scripts/manage.sh health",
+    "verify": "./scripts/verify-credentials.sh",
     "logs": "./scripts/manage.sh logs",
     "free-ports": "./scripts/manage.sh free-ports",
     "certs": "./scripts/manage.sh certs",
