@@ -78,6 +78,8 @@ graph TD
 | [adr-0011-infrastructure-resource-optimization.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0011-infrastructure-resource-optimization.md) | ADR 0011 — Stack-wide memory limits, cgroup ceilings & logging caps across 10 services. | Infrastructure & SRE Leads |
 | [adr-0012-clickhouse-configuration.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0012-clickhouse-configuration.md) | ADR 0012 — ClickHouse server & profile settings validated against 26.8.2.7 under 4096M. | Database Administrators & SREs |
 | [adr-0013-otel-collector-configuration.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0013-otel-collector-configuration.md) | ADR 0013 — OpenTelemetry Collector memory limiter & runtime bounds under 1024M. | SREs & Observability Architects |
+| [adr-0019-service-isolated-memory-sizing-and-profile-topology.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0019-service-isolated-memory-sizing-and-profile-topology.md) | ADR 0019 — Microservice sub-stack memory bounds, distroless healthchecks & profile tagging. | Infrastructure Architects & DevOps |
+| [adr-0020-persistent-storage-lifecycle-and-stateful-decoupling.md](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0020-persistent-storage-lifecycle-and-stateful-decoupling.md) | ADR 0020 — Persistent storage decoupling, Redis persistence, auto-init & shutdown grace periods. | Principal SREs & Data Engineers |
 
 ---
 

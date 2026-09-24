@@ -593,7 +593,7 @@ ArgoCD **Sync Waves** eliminate this by enforcing deterministic step-by-step ord
 |---|---|---|---|
 | **Wave 0** | `k8s/namespace.yaml` | `Namespace` | Namespace exists and is active. |
 | **Wave 1** | `k8s/configmap.yaml`, `k8s/secrets.yaml` | `ConfigMap`, `Secret` | Resources created in API server. |
-| **Wave 2** | `k8s/persistent-volume-claims.yaml` | `PersistentVolumeClaim` (x6) | PVC status transitions to `Bound`. |
+| **Wave 2** | `k8s/persistent-volume-claims.yaml` | `PersistentVolumeClaim` (x7) | PVC status transitions to `Bound`. |
 | **Wave 3** | `k8s/deployments/alloydb-*`, `redis-*`, `clickhouse-*`, `kafka-*`, `tempo-*` | `Deployment`, `Service` | Database pods passing readiness probes (`pg_isready`, `redis-cli ping`, HTTP `/ping`). |
 | **Wave 4** | `k8s/deployments/opentelemetry-*`, `grafana-*`, `temporal-*` | `Deployment`, `Service` | Telemetry pipelines and UI portals healthy and connected to databases. |
 | **Wave 5** | `k8s/rollouts/canary-deployment-rollout.yaml` | `Rollout`, `Service` (x2) | Handoff to Argo Rollouts controller for canary traffic progression. |

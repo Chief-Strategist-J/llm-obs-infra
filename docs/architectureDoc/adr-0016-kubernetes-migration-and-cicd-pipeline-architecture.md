@@ -47,7 +47,7 @@ The manifest suite is structured as a layered dependency graph where base resour
 |---|---|---|
 | **Foundation** | `namespace.yaml` | Isolated `llmobs` namespace with standard labels |
 | **Configuration** | `configmap.yaml`, `secrets.yaml` | Centralized service endpoints (FQDN) and credential isolation |
-| **Storage** | `persistent-volume-claims.yaml` | Six PVCs: `alloydb-data-pvc` (20Gi), `alloydb-archive-pvc` (10Gi), `clickhouse-data-pvc` (50Gi), `tempo-data-pvc` (20Gi), `grafana-data-pvc` (5Gi), `kafka-data-pvc` (20Gi) |
+| **Storage** | `persistent-volume-claims.yaml` | Seven PVCs: `alloydb-data-pvc` (20Gi), `alloydb-archive-pvc` (10Gi), `clickhouse-data-pvc` (50Gi), `tempo-data-pvc` (20Gi), `grafana-data-pvc` (5Gi), `kafka-data-pvc` (20Gi), `redis-data-pvc` (10Gi) |
 | **Workloads** | `deployments/*.yaml` | 8 Deployment + Service pairs (AlloyDB, Redis, ClickHouse, Kafka, Tempo, OTel Collector, Grafana, Temporal) |
 | **Progressive Delivery** | `rollouts/canary-deployment-rollout.yaml` | Argo Rollouts `Rollout` CRD with 4-stage canary strategy |
 
@@ -198,9 +198,9 @@ kubectl argo rollouts abort llmobs-canary-rollout -n llmobs
 | `namespace.yaml` | `Namespace` | Isolated `llmobs` namespace |
 | `configmap.yaml` | `ConfigMap` | System environment with FQDN service endpoints |
 | `secrets.yaml` | `Secret` | Credential template (AlloyDB, Redis, ClickHouse, Grafana) |
-| `persistent-volume-claims.yaml` | `PersistentVolumeClaim` ×6 | Storage for AlloyDB (data+archive), ClickHouse, Tempo, Grafana, Kafka |
+| `persistent-volume-claims.yaml` | `PersistentVolumeClaim` ×7 | Storage for AlloyDB (data+archive), ClickHouse, Tempo, Grafana, Kafka, Redis |
 | `deployments/alloydb-relational-db.yaml` | `Deployment`, `Service` | AlloyDB Omni PostgreSQL with init container |
-| `deployments/redis-ledger-cache.yaml` | `Deployment`, `Service` | Redis 7 Alpine with password auth |
+| `deployments/redis-ledger-cache.yaml` | `Deployment`, `Service` | Redis 7 Alpine with password auth, persistent AOF storage, and volume mount |
 | `deployments/clickhouse-analytics-db.yaml` | `Deployment`, `Service` | ClickHouse with HTTP + Native ports |
 | `deployments/kafka-event-broker.yaml` | `Deployment`, `Service` | Apache Kafka KRaft mode |
 | `deployments/tempo-trace-storage.yaml` | `Deployment`, `Service` | Grafana Tempo trace backend |

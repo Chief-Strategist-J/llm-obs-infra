@@ -32,6 +32,8 @@ This document provides the consolidated index of key Architectural Decision Reco
 | [ADR-0016](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0016-kubernetes-migration-and-cicd-pipeline-architecture.md) | Kubernetes Migration Manifests & CI/CD Pipeline Architecture | Accepted | Deploy declarative K8s manifests for 8 core services and 5 modular GitHub Actions CI/CD workflows. |
 | [ADR-0017](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0017-canary-deployment-strategy-and-progressive-delivery.md) | Canary Deployment Strategy & Progressive Delivery Architecture | Accepted | Deploy Argo Rollouts progressive delivery controller with dual-service traffic splitting, 4-stage rollout, and automated Prometheus circuit breakers. |
 | [ADR-0018](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0018-continuous-integration-and-delivery-pipeline-architecture.md) | Continuous Integration & Continuous Delivery (CI/CD) Pipeline Architecture | Accepted | Establish 5 modular GitHub Actions pipelines with three-tier validation cascade, Docker Buildx SBOM/provenance, and least-privilege OIDC tokens. |
+| [ADR-0019](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0019-service-isolated-memory-sizing-and-profile-topology.md) | Service Sub-Stack Isolated Memory Sizing & Profile Topology | Accepted | Standardize per-service memory bounds, distroless healthchecks, and Compose profile tagging across all 6 microservice domains. |
+| [ADR-0020](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0020-persistent-storage-lifecycle-and-stateful-decoupling.md) | Persistent Storage Lifecycle, Host Volume Decoupling & Stateful Protection | Accepted | Bind all root and microservice datastores to persistent host disks, mandate Redis AOF persistence and PVCs, inject automated non-destructive directory initialization, and extend shutdown grace periods. |
 
 ---
 
@@ -77,10 +79,21 @@ This document provides the consolidated index of key Architectural Decision Reco
 - **Decision**: Establish 5 modular GitHub Actions workflows with a three-tier validation cascade, Docker Buildx caching (`type=gha`), SPDX SBOM generation, SLSA provenance attestation, and ArgoCD GitOps integration.
 - **Consequences**: Provides sub-45-second validation feedback, enforces supply chain verification, and enables pull-based GitOps reconciliation without exposing cluster credentials in CI runners.
 
+### ADR-0019: Service Sub-Stack Isolated Memory Sizing & Profile Topology
+- **Context**: Unconstrained AlloyDB Omni instances claimed full host RAM causing memory watchdog kills, distroless OTel collectors failed shell healthchecks, and sub-stacks lacked uniform Compose profile tags.
+- **Decision**: Cap AlloyDB Omni shared buffers and columnar engine via mounted `postgresql.conf`, remove shell healthchecks on distroless collectors in favor of TCP probes, and enforce uniform profile metadata (`auth`, `audit`, etc.).
+- **Consequences**: Stabilizes sub-stack container footprint to ~1.85 GB minimum / ~6.5 GB ceiling per service, prevents OOM-killer crashes, and standardizes profile-targeted deployments.
+
+### ADR-0020: Persistent Storage Lifecycle, Host Volume Decoupling & Stateful Protection
+- **Context**: Ephemeral cloud VM autoscaling destroyed database volumes on scale-in or auto-healing, Redis ran without persistent disk backing or AOF logging, host directory bind mounts failed on unprivileged UIDs, and 10-second default shutdowns corrupted database WAL flushes.
+- **Decision**: Decouple all stateful storage to persistent host mounts (`${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}` in prod, `${LLMOBS_DATA_DIR:-./data}/...` in dev), mandate Redis persistent volume mounts and `--appendonly yes`, inject automated `ensure_data_storage` with `0777` permissions into deploy scripts, add `redis-data-pvc` (10Gi) to Kubernetes, and extend shutdown grace periods (`60s`/`30s`).
+- **Consequences**: Completely eliminates P0 permanent data loss during node replacement, guarantees Redis ledger durability across restarts, automates zero-friction local development, and prevents database commit log corruption during container teardown.
+
 ---
 
 ## 3. Related Documents
 
-- [Infrastructure Resilience and Edge Case Hardening](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/architectureDoc/infrastructure-resilience-and-edge-case-hardening.md)
-- [Critical Security Remediation Mandate](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/critical-security-remediation-mandate.md)
-- [ADR-0006 Audit Remediation Plan](file:///home/btpl-lap-22/live/llm-observability-platform/packages/configs/llm-obs-infra/docs/securityDoc/audits/remediation-plan-adr-0006.md)
+- [Infrastructure Resilience and Edge Case Hardening](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/infrastructure-resilience-and-edge-case-hardening.md)
+- [Critical Security Remediation Mandate](file:///home/btpl-lap-22/live/llm-obs-infra/docs/securityDoc/critical-security-remediation-mandate.md)
+- [ADR-0019: Service Isolated Memory Sizing](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0019-service-isolated-memory-sizing-and-profile-topology.md)
+- [ADR-0020: Persistent Storage Lifecycle & Stateful Protection](file:///home/btpl-lap-22/live/llm-obs-infra/docs/architectureDoc/adr-0020-persistent-storage-lifecycle-and-stateful-decoupling.md)
