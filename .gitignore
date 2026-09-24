@@ -1,4 +1,11 @@
-
 .env
 config/certs/
 backups/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan

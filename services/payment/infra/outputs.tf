@@ -1,35 +1,76 @@
+/*
+ALGORITHM:
+1. Export Network layer identifiers (VPC name, Subnet name, Subnet CIDR)
+2. Export Security and Instance layer attributes (Service Account email, enabled APIs, Template link)
+3. Export Compute and Scaling parameters (IGM name, Autoscaler name, Scaling policy)
+4. Export Cloud operational and deployment commands (list instances, describe group, deploy services)
+*/
+
+output "service_name" {
+  value       = var.service_name
+  description = "Target service stack name"
+}
+
 output "vpc_name" {
-  value       = google_compute_network.payment_vpc.name
+  value       = module.network.network_name
   description = "Provisioned GCP VPC Network Name"
 }
 
 output "subnet_name" {
-  value       = google_compute_subnetwork.payment_subnet.name
+  value       = module.network.subnetwork_name
   description = "Provisioned GCP Subnet Name"
 }
 
-output "payment_node_public_ip" {
-  value       = google_compute_address.payment_ip.address
-  description = "External Static IP address of the GCP Payment Infrastructure Node"
+output "subnet_cidr" {
+  value       = module.network.subnetwork_cidr
+  description = "Provisioned GCP Subnet CIDR block"
 }
 
-output "payment_node_private_ip" {
-  value       = google_compute_instance.payment_node.network_interface[0].network_ip
-  description = "Internal Private IP address of the GCP Payment Infrastructure Node"
+output "service_account_email" {
+  value       = module.instance.service_account_email
+  description = "Email of the dedicated least-privilege Service Account attached to the instances"
 }
 
-output "ssh_connection_command" {
-  value       = "gcloud compute ssh ${google_compute_instance.payment_node.name} --zone=${var.gcp_zone} --project=${var.gcp_project_id}"
-  description = "gcloud SSH command to access the deployment node"
+output "enabled_google_services" {
+  value       = module.instance.enabled_services
+  description = "List of Google Cloud APIs enabled for this infrastructure"
 }
 
-output "service_endpoints" {
+output "instance_template_name" {
+  value       = module.instance.template_name
+  description = "Name of the created Compute Instance Template"
+}
+
+output "instance_template_self_link" {
+  value       = module.instance.template_self_link
+  description = "Self link URI of the Compute Instance Template"
+}
+
+output "instance_group_manager_name" {
+  value       = module.compute.instance_group_manager_name
+  description = "Managed Instance Group Manager Name"
+}
+
+output "autoscaler_name" {
+  value       = module.compute.autoscaler_name
+  description = "Compute Autoscaler Name"
+}
+
+output "scaling_policy" {
   value = {
-    database         = "${google_compute_address.payment_ip.address}:5433"
-    redis_ledger     = "${google_compute_address.payment_ip.address}:6380"
-    kafka_broker     = "${google_compute_address.payment_ip.address}:9093"
-    otel_collector   = "http://${google_compute_address.payment_ip.address}:4319"
-    service_registry = "http://${google_compute_address.payment_ip.address}:31427"
+    min_replicas           = module.compute.min_replicas
+    max_replicas           = module.compute.max_replicas
+    target_cpu_utilization = module.compute.target_cpu_utilization
   }
-  description = "Public connection endpoints for all 5 Payment services"
+  description = "Configured autoscaling policy thresholds"
+}
+
+output "cloud_commands" {
+  value = {
+    deploy_services = "bash $(pwd)/scripts/deploy-services.sh"
+    list_instances  = "gcloud compute instance-groups list-instances ${module.compute.instance_group_manager_name} --zone=${var.gcp_zone} --project=${var.gcp_project_id}"
+    describe_group  = "gcloud compute instance-groups managed describe ${module.compute.instance_group_manager_name} --zone=${var.gcp_zone} --project=${var.gcp_project_id}"
+    view_autoscaler = "gcloud compute autoscalers describe ${module.compute.autoscaler_name} --zone=${var.gcp_zone} --project=${var.gcp_project_id}"
+  }
+  description = "Operational gcloud commands for deployment and monitoring"
 }
