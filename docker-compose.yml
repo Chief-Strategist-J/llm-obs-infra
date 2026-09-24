@@ -80,8 +80,10 @@ services:
     environment:
       - OTEL_SERVICE_NAME=llmobs-redis-ledger
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://llmobs-otel-collector:4318
+    stop_grace_period: 30s
     volumes:
       - ./config/redis/redis.conf:/etc/redis/redis.conf:ro
+      - redis_data:/data
     networks:
       - llmobs-network
     healthcheck:
@@ -95,6 +97,7 @@ services:
     container_name: llmobs-kafka-broker
     profiles: ["streaming", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *default-logging
     ulimits:
       nofile:
@@ -140,6 +143,7 @@ services:
     container_name: llmobs-clickhouse-analytics
     profiles: ["analytics", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *default-logging
     ulimits:
       nofile:
@@ -298,6 +302,7 @@ services:
     container_name: llmobs-alloydb-db
     profiles: ["db", "workflows", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *audit-logging
     deploy:
       resources:
@@ -442,3 +447,4 @@ volumes:
   alloydb_data:
   clickhouse_data:
   kafka_data:
+  redis_data:

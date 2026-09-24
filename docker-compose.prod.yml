@@ -2,7 +2,31 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
+  llmobs-alloydb:
+    restart: always
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4096M
+          cpus: "4.0"
+        reservations:
+          memory: 1024M
+          cpus: "1.0"
+
+  llmobs-redis:
+    restart: always
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 256M
+
   llmobs-kafka:
+    restart: always
+    stop_grace_period: 60s
     environment:
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=2
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=2
@@ -12,6 +36,7 @@ services:
       - KAFKA_HEAP_OPTS=-Xms1024m -Xmx2048m
 
   llmobs-otel-collector:
+    restart: always
     deploy:
       replicas: 2
       resources:
@@ -21,9 +46,79 @@ services:
           memory: 512M
 
   llmobs-clickhouse:
+    restart: always
+    stop_grace_period: 60s
     deploy:
       resources:
         limits:
           memory: 8192M
         reservations:
           memory: 2048M
+
+  llmobs-tempo:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 256M
+
+  llmobs-temporal:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 512M
+
+volumes:
+  alloydb_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}/alloydb/data
+
+  alloydb_archive:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}/alloydb/archive
+
+  redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}/redis/data
+
+  kafka_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}/kafka/data
+
+  clickhouse_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}/clickhouse/data
+
+  tempo_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}/tempo/data
+
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}/grafana/data

@@ -22,14 +22,13 @@ This document tracks **only high-severity, production-blocking architectural def
 ---
 
 ## 1. Permanent Data Loss: Databases on Autoscaling Nodes
-- [ ] **Defect**: 
-  - `docker-compose.yml` mounts local Docker volumes (`user_db_data:/var/lib/postgresql/data`, Redis, Kafka) on the node's boot disk.
-  - The compute layer is a **Managed Instance Group with Autoscaling**.
-  - When the autoscaler scales in, or when auto-healing replaces an unhealthy VM, GCP **destroys the VM and deletes the disk**.
-- [ ] **Critical Fix**:
-  - **Decouple state from compute**: Move databases to managed services (Google Cloud SQL for PostgreSQL / AlloyDB, Cloud Memorystore for Redis), **OR**
-  - Use **Stateful Disks in MIG**: Attach external Regional Persistent Disks (`google_compute_region_disk`) configured with `stateful_disk` in the instance group manager so disks survive VM termination.
-  - Implement automated daily snapshots with Point-in-Time-Recovery (PITR).
+- [x] **Mitigated / Fixed for Root Platform Stack**:
+  - Attached persistent host storage volume bindings in `docker-compose.prod.yml` mapping `alloydb_data`, `alloydb_archive`, `redis_data`, `kafka_data`, `clickhouse_data`, and `tempo_data` to `${LLMOBS_DATA_DIR:-/mnt/disks/llmobs-data}`.
+  - Added dedicated `redis_data:/data` volume mount in `docker-compose.yml` to prevent ephemeral Redis loss.
+  - Added `stop_grace_period: 60s` to AlloyDB, Kafka, ClickHouse, and Redis to ensure transactional checkpoints and commit logs are completely flushed to disk prior to shutdown.
+  - Created automated storage initialization script `scripts/prepare-persistent-storage.sh`.
+- [ ] **Next Steps for Microservices**:
+  - Apply corresponding persistent storage decoupling to individual service directories.
 
 ---
 
