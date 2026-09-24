@@ -93,3 +93,20 @@ spec:
     requests:
       storage: 20Gi
   storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data-pvc
+  namespace: llmobs
+  labels:
+    app.kubernetes.io/part-of: llm-obs-infra
+    app.kubernetes.io/component: cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+

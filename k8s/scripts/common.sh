@@ -140,7 +140,7 @@ resolve_service_manifest() {
       echo "deployments/alloydb-relational-db.yaml:deployment/llmobs-alloydb-db:stateful:5432"
       ;;
     redis|redis-ledger|llmobs-redis-ledger|redis-ledger-cache)
-      echo "deployments/redis-ledger-cache.yaml:deployment/llmobs-redis-ledger:stateless:6379"
+      echo "deployments/redis-ledger-cache.yaml:deployment/llmobs-redis-ledger:stateful:6379"
       ;;
     clickhouse|clickhouse-analytics|llmobs-clickhouse-analytics|clickhouse-analytics-db)
       echo "deployments/clickhouse-analytics-db.yaml:deployment/llmobs-clickhouse-analytics:stateful:8123"

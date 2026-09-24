@@ -27,8 +27,14 @@ This document tracks **only high-severity, production-blocking architectural def
   - Added dedicated `redis_data:/data` volume mount in `docker-compose.yml` to prevent ephemeral Redis loss.
   - Added `stop_grace_period: 60s` to AlloyDB, Kafka, ClickHouse, and Redis to ensure transactional checkpoints and commit logs are completely flushed to disk prior to shutdown.
   - Created automated storage initialization script `scripts/prepare-persistent-storage.sh`.
-- [ ] **Next Steps for Microservices**:
-  - Apply corresponding persistent storage decoupling to individual service directories.
+- [x] **Mitigated / Fixed for Microservices**:
+  - Bound microservice databases, redis ledgers, and kafka brokers across `services/{audit,auth,notifications,payment,storage,user}/docker-compose.yml` to `${LLMOBS_DATA_DIR:-./data}/...`.
+  - Added safe shutdown grace periods (`60s` for DBs/Kafka, `30s` for Redis) to protect from abrupt kill signals.
+  - Injected non-destructive `ensure_data_storage` function into all `services/*/scripts/deploy.sh` to auto-initialize directories with `0777` permissions or reuse existing data.
+- [x] **Mitigated / Fixed for Kubernetes Stack (`k8s/`)**:
+  - Added dedicated `redis-data-pvc` (10Gi RWO) to `k8s/persistent-volume-claims.yaml`.
+  - Mounted `/data` in `k8s/deployments/redis-ledger-cache.yaml` with `--dir /data --appendonly yes` persistence flags.
+  - Updated `k8s/scripts/common.sh` to classify Redis as `stateful`, ensuring storage claims are applied before deployment.
 
 ---
 

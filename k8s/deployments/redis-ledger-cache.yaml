@@ -33,6 +33,10 @@ spec:
             - "/etc/redis/redis.conf"
             - "--requirepass"
             - "$(REDIS_PASSWORD)"
+            - "--dir"
+            - "/data"
+            - "--appendonly"
+            - "yes"
           ports:
             - containerPort: 6379
               name: redis
@@ -76,11 +80,16 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 5
           volumeMounts:
+            - name: redis-data
+              mountPath: /data
             - name: redis-config
               mountPath: /etc/redis/redis.conf
               subPath: redis.conf
               readOnly: true
       volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-data-pvc
         - name: redis-config
           configMap:
             name: redis-config
