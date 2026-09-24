@@ -10,6 +10,7 @@ services:
     container_name: audit-service-db
     profiles: ["audit", "db", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *default-logging
     deploy:
       resources:
@@ -61,6 +62,7 @@ services:
     container_name: audit-redis-ledger
     profiles: ["audit", "db", "full"]
     restart: unless-stopped
+    stop_grace_period: 30s
     logging: *default-logging
     command: >
       redis-server
@@ -88,6 +90,7 @@ services:
     container_name: audit-kafka-broker
     profiles: ["audit", "streaming", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *default-logging
     ulimits:
       nofile:
@@ -199,6 +202,29 @@ networks:
 
 volumes:
   audit_db_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/db/data
+
   audit_db_archive:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/db/archive
+
   audit_redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/redis/data
+
   audit_kafka_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/kafka/data

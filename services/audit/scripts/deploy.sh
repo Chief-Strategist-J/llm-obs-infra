@@ -34,9 +34,28 @@ ensure_env() {
   fi
 }
 
+ensure_data_storage() {
+  local data_dir="${LLMOBS_DATA_DIR:-$AUDIT_DIR/data}"
+  local subdirs=("db/data" "db/archive" "redis/data" "kafka/data")
+  local created=0
+  for sub in "${subdirs[@]}"; do
+    if [ ! -d "$data_dir/$sub" ]; then
+      mkdir -p "$data_dir/$sub"
+      chmod 777 "$data_dir/$sub" 2>/dev/null || true
+      created=1
+    fi
+  done
+  if [ "$created" -eq 1 ]; then
+    echo -e "${GREEN}✓ Initialized persistent storage directories in $data_dir${NC}"
+  else
+    echo -e "${BLUE}✓ Reusing existing persistent storage from $data_dir${NC}"
+  fi
+}
+
 case "${1:-up}" in
   up)
     ensure_env
+    ensure_data_storage
     echo -e "${BLUE}Launching Audit Service Stack (Database, Redis, Kafka, OTel, Service Registry)...${NC}"
     $BIN -f "$COMPOSE_FILE" --profile audit up -d
     echo -e "${GREEN}✓ Audit stack container deployment initiated.${NC}"
@@ -48,6 +67,7 @@ case "${1:-up}" in
     echo -e "${GREEN}✓ Audit stack stopped.${NC}"
     ;;
   restart)
+    ensure_data_storage
     echo -e "${BLUE}Restarting Audit Service Stack...${NC}"
     $BIN -f "$COMPOSE_FILE" --profile audit restart
     bash "$SCRIPT_DIR/health-check.sh" || true

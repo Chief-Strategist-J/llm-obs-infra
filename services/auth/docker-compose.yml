@@ -10,6 +10,7 @@ services:
     container_name: auth-service-db
     profiles: ["auth", "db", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *default-logging
     deploy:
       resources:
@@ -61,6 +62,7 @@ services:
     container_name: llmobs-redis-ledger
     profiles: ["auth", "db", "full"]
     restart: unless-stopped
+    stop_grace_period: 30s
     logging: *default-logging
     command: >
       redis-server
@@ -88,6 +90,7 @@ services:
     container_name: llmobs-kafka-broker
     profiles: ["auth", "streaming", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *default-logging
     ulimits:
       nofile:
@@ -200,6 +203,29 @@ networks:
 
 volumes:
   auth_db_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/db/data
+
   auth_db_archive:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/db/archive
+
   auth_redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/redis/data
+
   auth_kafka_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/kafka/data

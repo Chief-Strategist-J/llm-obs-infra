@@ -10,6 +10,7 @@ services:
     container_name: notification-service-db
     profiles: ["notifications", "db", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *default-logging
     deploy:
       resources:
@@ -61,6 +62,7 @@ services:
     container_name: notification-redis-ledger
     profiles: ["notifications", "db", "full"]
     restart: unless-stopped
+    stop_grace_period: 30s
     logging: *default-logging
     command: >
       redis-server
@@ -88,6 +90,7 @@ services:
     container_name: notification-kafka-broker
     profiles: ["notifications", "streaming", "full"]
     restart: unless-stopped
+    stop_grace_period: 60s
     logging: *default-logging
     ulimits:
       nofile:
@@ -199,6 +202,29 @@ networks:
 
 volumes:
   notification_db_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/db/data
+
   notification_db_archive:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/db/archive
+
   notification_redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/redis/data
+
   notification_kafka_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/kafka/data
