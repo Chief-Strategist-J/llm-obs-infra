@@ -32,7 +32,7 @@ IMAGES=(
   "grafana/grafana:latest"
 )
 
-TOTAL_STEPS=6
+TOTAL_STEPS=7
 PASSED_STEPS=0
 
 echo -e "${BLUE}══════════════════════════════════════════════════════════${NC}"
@@ -110,11 +110,22 @@ else
 fi
 PASSED_STEPS=$((PASSED_STEPS + 1))
 
-echo -e "\n${YELLOW}[3/${TOTAL_STEPS}] Generating TLS certificates...${NC}"
+echo -e "\n${YELLOW}[3/${TOTAL_STEPS}] Initializing persistent storage directories...${NC}"
+DATA_DIR="${LLMOBS_DATA_DIR:-$PKG_DIR/data}"
+for sub in "alloydb/data" "alloydb/archive" "redis/data" "kafka/data" "clickhouse/data" "tempo/data" "grafana/data"; do
+  if [ ! -d "$DATA_DIR/$sub" ]; then
+    mkdir -p "$DATA_DIR/$sub"
+    chmod 777 "$DATA_DIR/$sub" 2>/dev/null || true
+  fi
+done
+echo -e "  ${GREEN}✓${NC} Persistent storage verified at: ${DATA_DIR}"
+PASSED_STEPS=$((PASSED_STEPS + 1))
+
+echo -e "\n${YELLOW}[4/${TOTAL_STEPS}] Generating TLS certificates...${NC}"
 bash "$SCRIPT_DIR/generate-certs.sh"
 PASSED_STEPS=$((PASSED_STEPS + 1))
 
-echo -e "\n${YELLOW}[4/${TOTAL_STEPS}] Configuring /etc/hosts for custom domains...${NC}"
+echo -e "\n${YELLOW}[5/${TOTAL_STEPS}] Configuring /etc/hosts for custom domains...${NC}"
 
 HOSTS_LINE="127.0.0.1  ${HOSTS_DOMAINS}"
 HOSTS_MISSING=false
@@ -144,7 +155,7 @@ else
 fi
 PASSED_STEPS=$((PASSED_STEPS + 1))
 
-echo -e "\n${YELLOW}[5/${TOTAL_STEPS}] Pulling Docker images...${NC}"
+echo -e "\n${YELLOW}[6/${TOTAL_STEPS}] Pulling Docker images...${NC}"
 cd "$PKG_DIR"
 
 for img in "${IMAGES[@]}"; do
@@ -154,7 +165,7 @@ done
 echo -e "  ${GREEN}✓${NC} All Docker images pulled"
 PASSED_STEPS=$((PASSED_STEPS + 1))
 
-echo -e "\n${YELLOW}[6/${TOTAL_STEPS}] Validating setup...${NC}"
+echo -e "\n${YELLOW}[7/${TOTAL_STEPS}] Validating setup...${NC}"
 
 VALID=true
 

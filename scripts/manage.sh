@@ -45,6 +45,33 @@ ensure_env_file() {
   fi
 }
 
+ensure_data_storage() {
+  local pkg_dir=$1
+  local data_dir="${LLMOBS_DATA_DIR:-$pkg_dir/data}"
+  local subdirs=(
+    "alloydb/data"
+    "alloydb/archive"
+    "redis/data"
+    "kafka/data"
+    "clickhouse/data"
+    "tempo/data"
+    "grafana/data"
+  )
+  local created=0
+  for sub in "${subdirs[@]}"; do
+    if [ ! -d "$data_dir/$sub" ]; then
+      mkdir -p "$data_dir/$sub"
+      chmod 777 "$data_dir/$sub" 2>/dev/null || true
+      created=1
+    fi
+  done
+  if [ "$created" -eq 1 ]; then
+    echo -e "${GREEN}✓ Initialized persistent data directories under: $data_dir${NC}"
+  else
+    echo -e "${BLUE}✓ Reusing existing persistent data directories from: $data_dir${NC}"
+  fi
+}
+
 execute_up_pipeline() {
   local bin=$1
   local compose_file=$2
@@ -55,6 +82,7 @@ execute_up_pipeline() {
   local profiles=("$@")
 
   ensure_env_file "$pkg_dir"
+  ensure_data_storage "$pkg_dir"
 
   local prereq_script
   prereq_script=$(find_required_script "system-prereqs.sh" "$scripts_root")

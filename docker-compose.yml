@@ -441,10 +441,51 @@ networks:
     external: true
 
 volumes:
-  alloydb_archive:
-  tempo_data:
-  grafana_data:
   alloydb_data:
-  clickhouse_data:
-  kafka_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/alloydb/data
+
+  alloydb_archive:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/alloydb/archive
+
   redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/redis/data
+
+  kafka_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/kafka/data
+
+  clickhouse_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/clickhouse/data
+
+  tempo_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/tempo/data
+
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LLMOBS_DATA_DIR:-./data}/grafana/data

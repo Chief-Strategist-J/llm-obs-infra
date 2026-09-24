@@ -1,6 +1,7 @@
 .env
 config/certs/
 backups/
+data/
 
 # Terraform
 **/.terraform/
