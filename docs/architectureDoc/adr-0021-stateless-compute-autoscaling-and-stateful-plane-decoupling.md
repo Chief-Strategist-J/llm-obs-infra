@@ -250,7 +250,7 @@ sequenceDiagram
 
     rect rgb(245, 255, 245)
         Note over APP,DB: Phase 2: Relational Persistence
-        APP->>PGB: BEGIN; INSERT INTO chat_sessions ...
+        APP->>PGB: BEGIN transaction and INSERT INTO chat_sessions
         PGB->>DB: Forward Transaction via Server Pool
         DB->>DB: Write WAL Log & Commit Buffer
         DB-->>PGB: Commit OK
@@ -512,8 +512,8 @@ flowchart TD
         P_VM2["Compute Node 2 Producer<br/>(acks=all, idempotence=true)"]
     end
 
-    P_VM1 ==>|Murmur2Hash(Key) % 3| L0
-    P_VM2 ==>|Murmur2Hash(Key) % 3| L1
+    P_VM1 ==>|"Murmur2Hash(Key) % 3"| L0
+    P_VM2 ==>|"Murmur2Hash(Key) % 3"| L1
 ```
 
 #### A. Monotonic Quorum & KRaft Protocol
