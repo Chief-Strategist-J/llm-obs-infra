@@ -22,7 +22,7 @@
     "frontend": "npm --prefix ../../node/web-app run web-app",
     "frontend:dev": "npm --prefix ../../node/web-app run dev",
     "test": "make test",
-    "test:registry": "cd service-discovery && go test -v ./tests/..."
+    "test:registry": "cd packages/service-discovery && go test -v ./tests/..."
   },
   "devDependencies": {
     "typescript": "^5.4.0",

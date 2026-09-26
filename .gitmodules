@@ -1,6 +1,9 @@
 [submodule "service-discovery"]
-	path = service-discovery
+	path = packages/service-discovery
 	url = https://github.com/Chief-Strategist-J/llm-service-discovery.git
 [submodule "policies"]
 	path = policies
 	url = https://github.com/Chief-Strategist-J/llm-obs-policies.git
+[submodule "packages/platform-orchestrator"]
+	path = packages/platform-orchestrator
+	url = https://github.com/Chief-Strategist-J/platform-orchestrator.git
