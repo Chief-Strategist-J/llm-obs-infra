@@ -27,10 +27,10 @@ This document tracks **only high-severity, production-blocking architectural def
   - Added dedicated `redis_data:/data` volume mount in `docker-compose.yml` to prevent ephemeral Redis loss.
   - Added `stop_grace_period: 60s` to AlloyDB, Kafka, ClickHouse, and Redis to ensure transactional checkpoints and commit logs are completely flushed to disk prior to shutdown.
   - Created automated storage initialization script `scripts/prepare-persistent-storage.sh`.
-- [x] **Mitigated / Fixed for Microservices**:
-  - Bound microservice databases, redis ledgers, and kafka brokers across `services/{audit,auth,notifications,payment,storage,user}/docker-compose.yml` to `${LLMOBS_DATA_DIR:-./data}/...`.
+- [x] **Mitigated / Fixed for Local Services (`local-services/`)**:
+  - Bound microservice databases, redis ledgers, and kafka brokers across `local-services/{audit,auth,notifications,payment,storage,user}/docker-compose.yml` to `${LLMOBS_DATA_DIR:-./data}/...`.
   - Added safe shutdown grace periods (`60s` for DBs/Kafka, `30s` for Redis) to protect from abrupt kill signals.
-  - Injected non-destructive `ensure_data_storage` function into all `services/*/scripts/deploy.sh` to auto-initialize directories with `0777` permissions or reuse existing data.
+  - Injected non-destructive `ensure_data_storage` function into all `local-services/*/scripts/deploy.sh` to auto-initialize directories with `0777` permissions or reuse existing data.
 - [x] **Mitigated / Fixed for Kubernetes Stack (`k8s/`)**:
   - Added dedicated `redis-data-pvc` (10Gi RWO) to `k8s/persistent-volume-claims.yaml`.
   - Mounted `/data` in `k8s/deployments/redis-ledger-cache.yaml` with `--dir /data --appendonly yes` persistence flags.
@@ -40,7 +40,7 @@ This document tracks **only high-severity, production-blocking architectural def
 
 ## 2. Split-Brain Data Corruption: Multiple Un-Replicated Nodes
 - [ ] **Defect**:
-  - When autoscaler triggers and scales a service from 1 to 2 or 3 instances, **each new VM boots its own local PostgreSQL and local Kafka container**.
+  - When autoscaler triggers and scales a service from 1 to 2 or 3 instances, **each new VM boots its own local PostgreSQL and local Kafka container** (in `docker-compose.yml`, `docker-compose.prod.yml`).
   - Requests hitting Node 1 write to Database 1; requests hitting Node 2 write to Database 2.
   - Events published on Node 1 never reach consumers on Node 2.
 - [ ] **Critical Fix**:

@@ -12,7 +12,7 @@ else
   shift || true
 fi
 
-SCRIPT_PATH="services/$SERVICE/scripts/verify-credentials.sh"
+SCRIPT_PATH="local-services/$SERVICE/scripts/verify-credentials.sh"
 
 if [ ! -f "$SCRIPT_PATH" ]; then
   echo "Error: Service '$SERVICE' not found."

@@ -8,14 +8,14 @@
 | **Target Repository** | `Chief-Strategist-J/llm-obs-infra` |
 | **Date** | 2026-09-15 |
 | **Version** | 1.0.0 |
-| **Scope** | `services/{auth,audit,notifications,payment,storage,user}/docker-compose.yml`, `services/*/scripts/deploy.sh`, `config/alloydb/postgresql.conf` |
+| **Scope** | `local-services/{auth,audit,notifications,payment,storage,user}/docker-compose.yml`, `local-services/*/scripts/deploy.sh`, `config/alloydb/postgresql.conf` |
 | **Validated Against** | Docker Engine 24.0+, Docker Compose v2.20+, AlloyDB Omni 15, OpenTelemetry Collector Contrib v0.160.0+ |
 
 ---
 
 ## 1. Executive Summary
 
-This Architecture Decision Record (ADR) formalizes the memory budgeting, resource constraints, health check standards, and profile isolation topology across all microservice sub-stacks (`services/auth`, `services/audit`, `services/notifications`, `services/payment`, `services/storage`, and `services/user`).
+This Architecture Decision Record (ADR) formalizes the memory budgeting, resource constraints, health check standards, and profile isolation topology across all microservice sub-stacks (`local-services/auth`, `local-services/audit`, `local-services/notifications`, `local-services/payment`, `local-services/storage`, and `local-services/user`).
 
 Prior to this decision:
 1. **Host-Derived Shared Buffers in AlloyDB Omni**: Without explicitly mounting `postgresql.conf` and passing `-c config_file=...`, AlloyDB Omni containers computed `shared_buffers` dynamically from the total host RAM (~15 GB) resulting in ~12 GB allocations inside constrained containers. This triggered internal watchdog backend terminations (`g_term_it`: *Memory critically low*) and crash loops.
@@ -58,17 +58,17 @@ Each service sub-stack is composed of 5 dedicated containers designed to provide
 * **Rationale**: Distroless images do not ship with interactive shells. Health verification is validated externally via TCP readiness probes on ports `4317` (gRPC) and `4318` (HTTP).
 
 ### 3.3 Uniform Profile Tagging Topology
-* **Decision**: Every service definition in `services/<service>/docker-compose.yml` is annotated with the profile taxonomy:
+* **Decision**: Every service definition in `local-services/<service>/docker-compose.yml` is annotated with the profile taxonomy:
   ```yaml
   profiles: ["<service_name>", "full", "<tier>"]
   ```
 * **Profile Mapping**:
-  - `services/auth` -> `profiles: ["auth", "db", "streaming", "tracing", "network", "full"]`
-  - `services/audit` -> `profiles: ["audit", "db", "streaming", "tracing", "network", "full"]`
-  - `services/notifications` -> `profiles: ["notifications", "db", "streaming", "tracing", "network", "full"]`
-  - `services/payment` -> `profiles: ["payment", "db", "streaming", "tracing", "network", "full"]`
-  - `services/storage` -> `profiles: ["storage", "db", "streaming", "tracing", "network", "full"]`
-  - `services/user` -> `profiles: ["user", "db", "streaming", "tracing", "network", "full"]`
+  - `local-services/auth` -> `profiles: ["auth", "db", "streaming", "tracing", "network", "full"]`
+  - `local-services/audit` -> `profiles: ["audit", "db", "streaming", "tracing", "network", "full"]`
+  - `local-services/notifications` -> `profiles: ["notifications", "db", "streaming", "tracing", "network", "full"]`
+  - `local-services/payment` -> `profiles: ["payment", "db", "streaming", "tracing", "network", "full"]`
+  - `local-services/storage` -> `profiles: ["storage", "db", "streaming", "tracing", "network", "full"]`
+  - `local-services/user` -> `profiles: ["user", "db", "streaming", "tracing", "network", "full"]`
 
 ---
 
@@ -79,29 +79,29 @@ To launch a specific service sub-stack with its isolated profile:
 
 ```bash
 # Auth Stack
-docker compose -f services/auth/docker-compose.yml --profile auth up -d
+docker compose -f local-services/auth/docker-compose.yml --profile auth up -d
 
 # Audit Stack
-docker compose -f services/audit/docker-compose.yml --profile audit up -d
+docker compose -f local-services/audit/docker-compose.yml --profile audit up -d
 
 # Notification Stack
-docker compose -f services/notifications/docker-compose.yml --profile notifications up -d
+docker compose -f local-services/notifications/docker-compose.yml --profile notifications up -d
 
 # Payment Stack
-docker compose -f services/payment/docker-compose.yml --profile payment up -d
+docker compose -f local-services/payment/docker-compose.yml --profile payment up -d
 
 # Storage Stack
-docker compose -f services/storage/docker-compose.yml --profile storage up -d
+docker compose -f local-services/storage/docker-compose.yml --profile storage up -d
 
 # User Stack
-docker compose -f services/user/docker-compose.yml --profile user up -d
+docker compose -f local-services/user/docker-compose.yml --profile user up -d
 ```
 
 ### Deploy Script Integration
 Each service directory's `scripts/deploy.sh` script passes `--profile <service>` directly:
 ```bash
-bash services/auth/scripts/deploy.sh status
-bash services/auth/scripts/deploy.sh health
+bash local-services/auth/scripts/deploy.sh status
+bash local-services/auth/scripts/deploy.sh health
 ```
 
 ---

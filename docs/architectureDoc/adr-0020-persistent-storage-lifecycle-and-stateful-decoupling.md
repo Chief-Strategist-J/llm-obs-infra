@@ -8,7 +8,7 @@
 | **Target Repository** | `Chief-Strategist-J/llm-obs-infra` |
 | **Date** | 2026-09-24 |
 | **Version** | 1.0.0 |
-| **Scope** | `docker-compose.yml`, `docker-compose.prod.yml`, `services/*/docker-compose.yml`, `services/*/scripts/deploy.sh`, `scripts/manage.sh`, `scripts/prepare-persistent-storage.sh`, `k8s/persistent-volume-claims.yaml`, `k8s/deployments/redis-ledger-cache.yaml`, `k8s/scripts/common.sh` |
+| **Scope** | `docker-compose.yml`, `docker-compose.prod.yml`, `local-services/*/docker-compose.yml`, `local-services/*/scripts/deploy.sh`, `scripts/manage.sh`, `scripts/prepare-persistent-storage.sh`, `k8s/persistent-volume-claims.yaml`, `k8s/deployments/redis-ledger-cache.yaml`, `k8s/scripts/common.sh` |
 | **Validated Against** | Docker Engine 24.0+, Docker Compose v2.20+, Kubernetes v1.31.0, PostgreSQL 15 / AlloyDB Omni, Redis 7 Alpine, Apache Kafka 3.7+ (KRaft), ClickHouse v24.8 |
 
 ---
@@ -69,8 +69,8 @@ graph TD
     end
 
     subgraph "Microservices Sub-Stacks"
-        MS_Script["services/*/scripts/deploy.sh (ensure_data_storage)"]:::service
-        MS_Compose["services/*/docker-compose.yml"]:::service
+        MS_Script["local-services/*/scripts/deploy.sh (ensure_data_storage)"]:::service
+        MS_Compose["local-services/*/docker-compose.yml"]:::service
         MS_Local["${LLMOBS_DATA_DIR:-./data}/... (0777)"]:::service
         MS_Grace["stop_grace_period: 60s / 30s"]:::service
         MS_Script --> MS_Local
@@ -95,7 +95,7 @@ graph TD
 
 ### 3.2 Sub-Stack Microservice Isolated Storage Topology
 
-* **Decision**: Every service sub-stack (`services/{audit,auth,notifications,payment,storage,user}`) MUST maintain isolated local storage bindings within its domain boundary:
+* **Decision**: Every service sub-stack (`local-services/{audit,auth,notifications,payment,storage,user}`) MUST maintain isolated local storage bindings within its domain boundary:
   ```yaml
   volumes:
     <service>_db_data:
@@ -134,7 +134,7 @@ graph TD
 
 ### 3.4 Deterministic Non-Destructive Directory Pre-Initialization
 
-* **Decision**: Every service deployment script (`services/*/scripts/deploy.sh`) and root management script (`scripts/manage.sh`, `scripts/setup.sh`) MUST execute an automated pre-flight hook: `ensure_data_storage`.
+* **Decision**: Every service deployment script (`local-services/*/scripts/deploy.sh`) and root management script (`scripts/manage.sh`, `scripts/setup.sh`) MUST execute an automated pre-flight hook: `ensure_data_storage`.
 * **Algorithm**:
   1. Inspect the target storage path (`$LLMOBS_DATA_DIR` or `./data`).
   2. For missing directories, invoke `mkdir -p` and set directory permissions to `0777` to guarantee container compatibility across arbitrary UIDs.
@@ -203,4 +203,4 @@ graph TD
 
 1. **Compose Configuration Validation**: Validated with `docker compose config` across root and all 6 microservices (`audit`, `auth`, `notifications`, `payment`, `storage`, `user`).
 2. **Kubernetes API Dry-Run**: Validated with `kubectl apply --dry-run=client -f k8s/persistent-volume-claims.yaml` and `kubectl apply --dry-run=client -f k8s/deployments/redis-ledger-cache.yaml`.
-3. **Script Syntax**: Validated with `bash -n` across all deployment scripts in `services/*/scripts/deploy.sh` and `k8s/scripts/**/*.sh`.
+3. **Script Syntax**: Validated with `bash -n` across all deployment scripts in `local-services/*/scripts/deploy.sh` and `k8s/scripts/**/*.sh`.
