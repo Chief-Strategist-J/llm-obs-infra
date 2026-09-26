@@ -1,0 +1,30 @@
+# Stateless Compute & Edge Plane Override for llm-obs-infra Stack
+# Usage on Autoscaling Compute Nodes:
+#   docker compose -f docker-compose.yml -f docker-compose.stateless.yml --profile stateless up -d
+
+services:
+  llmobs-service-registry:
+    environment:
+      - LLMOBS_PRIMARY_DATA_HOST=${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}:4318
+
+  llmobs-traefik:
+    environment:
+      - LLMOBS_PRIMARY_DATA_HOST=${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}:4318
+
+  llmobs-otel-collector:
+    environment:
+      - OTEL_SERVICE_NAME=llmobs-otel-collector-agent
+      - LLMOBS_PRIMARY_DATA_HOST=${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}
+
+  llmobs-temporal:
+    environment:
+      - POSTGRES_SEEDS=${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}
+      - TEMPORAL_TELEMETRY_TRACING_OTLP_ENDPOINT=${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}:4318
+
+  llmobs-grafana:
+    environment:
+      - GF_TRACING_OPENTELEMETRY_OTLP_ADDRESS=${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://${LLMOBS_PRIMARY_DATA_HOST:-llmobs-primary.internal}:4318

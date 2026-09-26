@@ -30,10 +30,12 @@ prompt_interactive_profile_selection() {
   echo -e "  ${BOLD}[5] Workflows Engine${NC}- Temporal Engine (+ auto-includes Database dependency)" >&2
   echo -e "  ${BOLD}[6] Tracing Stack${NC}   - Tempo + OpenTelemetry Collector + Grafana UI" >&2
   echo -e "  ${BOLD}[7] Network Gateway${NC} - Traefik Gateway + Service Registry" >&2
-  echo -e "  ${BOLD}[8] Custom Profiles${NC} - Specify custom profiles (e.g. 'db streaming')" >&2
+  echo -e "  ${BOLD}[8] Stateful Plane${NC}  - Dedicated Data Tier (AlloyDB, Kafka, Redis, ClickHouse, Tempo)" >&2
+  echo -e "  ${BOLD}[9] Stateless Plane${NC} - Autoscaled Compute/Edge (Traefik, Registry, OTel, Grafana, Temporal)" >&2
+  echo -e "  ${BOLD}[10] Custom Profiles${NC}- Specify custom profiles (e.g. 'stateful' or 'stateless')" >&2
   echo -e "-----------------------------------------------------" >&2
 
-  read -r -p "Enter choice [1-8] (default: 1): " choice >&2
+  read -r -p "Enter choice [1-10] (default: 1): " choice >&2
 
   case "$choice" in
     2) echo "db" ;;
@@ -42,7 +44,9 @@ prompt_interactive_profile_selection() {
     5) echo "workflows" ;;
     6) echo "tracing" ;;
     7) echo "network" ;;
-    8)
+    8) echo "stateful" ;;
+    9) echo "stateless" ;;
+    10)
       read -r -p "Enter profiles separated by space (e.g. db streaming): " custom_profiles >&2
       echo "${custom_profiles:-full}"
       ;;
@@ -60,6 +64,18 @@ resolve_profiles_and_dependencies() {
     echo "SERVICES=llmobs-alloydb llmobs-redis llmobs-clickhouse llmobs-kafka llmobs-tempo llmobs-otel-collector llmobs-grafana llmobs-traefik llmobs-temporal llmobs-service-registry"
     return 0
   fi
+
+  for item in "${raw_input[@]}"; do
+    if [ "$item" = "stateful" ] || [ "$item" = "data" ]; then
+      echo "PROFILES=--profile stateful"
+      echo "SERVICES=llmobs-alloydb llmobs-redis llmobs-clickhouse llmobs-kafka llmobs-tempo"
+      return 0
+    elif [ "$item" = "stateless" ] || [ "$item" = "compute" ]; then
+      echo "PROFILES=--profile stateless"
+      echo "SERVICES=llmobs-traefik llmobs-service-registry llmobs-otel-collector llmobs-grafana llmobs-temporal"
+      return 0
+    fi
+  done
 
   local req_db=false
   local req_analytics=false

@@ -9,7 +9,7 @@ This document tracks **only high-severity, production-blocking architectural def
 | # | Critical Vulnerability / Defect | Failure Mode | Severity | Impact |
 |---|---|---|---|---|
 | **1** | **Databases on Autoscaled Ephemeral Nodes** | Node scale-in or auto-healing deletes VM disk; data is destroyed | **CRITICAL P0** | **Permanent Data Loss** |
-| **2** | **Kafka & Database Split-Brain Upon Scaling** | When MIG scales to 2+ nodes, multiple un-replicated DBs and Kafkas run concurrently | **CRITICAL P0** | **Data Corruption & Lost Events** |
+| **2** | ~~**Kafka & Database Split-Brain Upon Scaling**~~ | Decoupled stateful plane from autoscaled stateless compute; remote dynamic discovery | **RESOLVED** | **Zero Split-Brain Risk** |
 | **3** | **Isolated VPCs (No Cross-Service Routing)** | Microservices reside in separate VPCs with no routes or peering | **CRITICAL P0** | **Inter-Service Deadlock** |
 | **4** | **Single Availability Zone Failure** | All resources locked to `us-central1-a`; single DC failure brings down platform | **CRITICAL P0** | **Total Downtime** |
 | **5** | **Cloud NAT Port Exhaustion Under LLM Load** | Concurrent outbound LLM API calls exhaust NAT ports, dropping requests | **CRITICAL P0** | **Silent API Timeouts** |
@@ -39,13 +39,12 @@ This document tracks **only high-severity, production-blocking architectural def
 ---
 
 ## 2. Split-Brain Data Corruption: Multiple Un-Replicated Nodes
-- [ ] **Defect**:
-  - When autoscaler triggers and scales a service from 1 to 2 or 3 instances, **each new VM boots its own local PostgreSQL and local Kafka container** (in `docker-compose.yml`, `docker-compose.prod.yml`).
-  - Requests hitting Node 1 write to Database 1; requests hitting Node 2 write to Database 2.
-  - Events published on Node 1 never reach consumers on Node 2.
-- [ ] **Critical Fix**:
-  - Keep the autoscaled compute layer **strictly stateless** (only APIs, proxy layers, workers).
-  - Centralize the datastore and event streaming bus so all compute replicas connect to a single authoritative cluster (or primary-replica setup).
+- [x] **Mitigated / Fixed Across Root Platform & Architecture (ADR-0021)**:
+  - **Plane Separation via Profiles**: Classified containers in `docker-compose.yml` into `stateful` (`alloydb`, `kafka`, `redis`, `clickhouse`, `tempo`) and `stateless` (`traefik`, `cloudflare-tunnel`, `otel-collector`, `grafana`, `service-registry`, `temporal`).
+  - **Stateless Compute Override (`docker-compose.stateless.yml`)**: Autoscaled compute nodes launch strictly with `--profile stateless`, mounting zero local database host volumes and routing data traffic to the authoritative primary cluster via `$LLMOBS_PRIMARY_DATA_HOST`.
+  - **Dynamic Cross-Node Service Discovery**: Enhanced `service-discovery` engine (`service-discovery/di/providers.go`) to dynamically expand environment variables in `services.json`, pointing compute nodes to the authoritative data plane.
+  - **Multi-Connector Cloudflare Ingress**: Tagged Cloudflare Tunnel (`docker-compose.cloudflare.yml`) as `stateless` so autoscaled compute nodes run load-balanced connectors against Traefik without data divergence.
+  - **CLI Orchestrator Integration**: Updated `scripts/orchestrator/profile-resolver.sh` and `scripts/manage.sh` to natively support `./scripts/manage.sh up stateful` (dedicated data host) vs. `./scripts/manage.sh up stateless` (autoscaled compute node).
 
 ---
 

@@ -9,14 +9,14 @@
     },
     {
       "name": "redis",
-      "host": "localhost",
+      "host": "${LLMOBS_PRIMARY_DATA_HOST:-localhost}",
       "port": 31413,
       "protocol": "tcp",
       "healthCheck": { "protocol": "tcp" }
     },
     {
       "name": "kafka",
-      "host": "localhost",
+      "host": "${LLMOBS_PRIMARY_DATA_HOST:-localhost}",
       "port": 31414,
       "protocol": "tcp",
       "healthCheck": { "protocol": "tcp" }
@@ -30,7 +30,7 @@
     },
     {
       "name": "tempo",
-      "host": "localhost",
+      "host": "${LLMOBS_PRIMARY_DATA_HOST:-localhost}",
       "port": 31416,
       "protocol": "http",
       "healthCheck": { "protocol": "http", "path": "/ready" }
@@ -44,21 +44,21 @@
     },
     {
       "name": "alloydb",
-      "host": "localhost",
+      "host": "${LLMOBS_PRIMARY_DATA_HOST:-localhost}",
       "port": 31420,
       "protocol": "tcp",
       "healthCheck": { "protocol": "tcp" }
     },
     {
       "name": "clickhouse",
-      "host": "localhost",
+      "host": "${LLMOBS_PRIMARY_DATA_HOST:-localhost}",
       "port": 31421,
       "protocol": "http",
       "healthCheck": { "protocol": "http", "path": "/ping" }
     },
     {
       "name": "temporal",
-      "host": "localhost",
+      "host": "${LLMOBS_PRIMARY_DATA_HOST:-localhost}",
       "port": 31424,
       "protocol": "tcp",
       "healthCheck": { "protocol": "tcp" }

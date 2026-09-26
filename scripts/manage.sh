@@ -82,7 +82,9 @@ execute_up_pipeline() {
   local profiles=("$@")
 
   ensure_env_file "$pkg_dir"
-  ensure_data_storage "$pkg_dir"
+  if ! [[ " ${profiles[*]} " =~ [[:space:]](stateless|compute)[[:space:]] ]]; then
+    ensure_data_storage "$pkg_dir"
+  fi
 
   local prereq_script
   prereq_script=$(find_required_script "system-prereqs.sh" "$scripts_root")

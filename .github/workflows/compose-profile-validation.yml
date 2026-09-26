@@ -16,13 +16,15 @@ on:
           - workflows
           - tracing
           - network
+          - stateful
+          - stateless
           - full
 
 permissions:
   contents: read
 
 env:
-  PROFILES: "db analytics streaming workflows tracing network full"
+  PROFILES: "db analytics streaming workflows tracing network stateful stateless full"
 
 jobs:
   validate-compose-profiles:

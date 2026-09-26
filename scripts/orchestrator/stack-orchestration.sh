@@ -47,9 +47,18 @@ start_profile_stack() {
   echo -e "${BLUE}⚡ Launching infrastructure stack with flags: ${BOLD}${profile_flags}${NC}"
   echo -e "${BLUE}⚡ Target services: ${BOLD}${target_services}${NC}"
 
+  local compose_files=("-f" "$compose_file")
+  local root_dir
+  root_dir="$(dirname "$compose_file")"
+  if [[ "$profile_flags" == *"--profile stateless"* ]] && [ -f "$root_dir/docker-compose.stateless.yml" ]; then
+    compose_files+=("-f" "$root_dir/docker-compose.stateless.yml")
+  elif [[ "$profile_flags" == *"--profile stateful"* ]] && [ -f "$root_dir/docker-compose.prod.yml" ]; then
+    compose_files+=("-f" "$root_dir/docker-compose.prod.yml")
+  fi
+
   # Execute compose up with profiles
   # shellcheck disable=SC2086
-  $bin -f "$compose_file" $profile_flags up -d $target_services
+  $bin "${compose_files[@]}" $profile_flags up -d $target_services
 
   # Run targeted health checks for active services
   # shellcheck disable=SC2086

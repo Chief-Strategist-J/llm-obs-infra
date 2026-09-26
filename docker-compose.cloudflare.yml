@@ -9,7 +9,7 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    profiles: ["cloudflare", "network", "full"]
+    profiles: ["cloudflare", "network", "stateless", "edge", "full"]
     networks:
       - llmobs-network
     depends_on:
