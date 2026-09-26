@@ -4,40 +4,57 @@ Package cmd provides the primary Cobra CLI interface and execution wiring for th
 ALGORITHM BLUEPRINT:
 1. RootCommand: Initializes top-level 'llmobs' CLI, base path resolution, and dependency injection wiring.
 2. Subcommand Registration:
-   - up: Dispatches to StackService.StartStack with resolved profiles and cert verification.
-   - down: Dispatches to StackService.StopStack.
-   - restart: Dispatches to StackService.RestartStack.
-   - status: Dispatches to StackService.GetStatus and renders a tabular overview.
-   - scale: Supports both interactive prompting and direct arguments (service scaling or simulated compute node launches).
-   - health: Dispatches to HealthService.RunHealthChecks; renders concurrent latency metrics and health states.
-   - certs: Dispatches to CertService.EnsureCertificates; generates self-signed TLS certs without openssl dependency.
-   - ports: Dispatches to PortService.FreePorts; detects and cleans socket contention.
-   - server: Boots the HTTP REST API server on configured port (default 31499).
+   - up: Interactive stack profile selector (TTY) or direct argument resolution; executes pre-flight checks, TLS certs, port checks, and stack startup.
+   - down: Shuts down all infrastructure containers across all profiles.
+   - restart: Restarts stack services and triggers automated post-boot health verification.
+   - status: Renders tabular overview of all managed container statuses.
+   - logs: Follows container log streams.
+   - free-ports: Scans and terminates stale socket listeners blocking platform ports.
+   - scale: Supports interactive and argument-driven scaling of services or simulated compute nodes.
+   - health: Executes concurrent TCP and HTTP diagnostic probes across platform services.
+   - certs: Generates native Go X.509 certificates for CA, server, and client.
+   - backup-purge: Performs disaster recovery dumps for AlloyDB and ClickHouse; optionally purges volumes.
+   - setup: Executes end-to-end 7-step platform bootstrapping pipeline.
+   - cloudflare: Manages Cloudflare Tunnel token configuration and container lifecycle.
+   - gdpr-erasure: Performs GDPR/CCPA data erasure across analytical and relational stores with audit logging.
+   - verify-credentials: Runs domain service credential verification test suites.
+   - server: Boots REST API daemon conforming to OpenAPI 3.1.0 specification.
 3. Invariants:
    - Root execution resolves workspace path automatically.
-   - Cobra commands return non-zero exit codes upon service failure.
+   - Zero inline comments inside function bodies.
+   - Cobra commands return non-zero exit codes upon failure.
 */
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/llm-observability/platform/packages/platform-orchestrator/src/api/rest"
+	backupSchema "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/backup/schema"
+	backupService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/backup/services"
 	certsSchema "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/certs/schema"
 	certsService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/certs/services"
+	cloudflareService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/cloudflare/services"
+	gdprSchema "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/gdpr/schema"
+	gdprService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/gdpr/services"
 	healthSchema "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/health/schema"
 	healthService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/health/services"
 	portsService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/ports/services"
+	prereqsService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/prereqs/services"
 	scaleSchema "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/scale/schema"
 	scaleService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/scale/services"
+	setupService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/setup/services"
 	stackSchema "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/stack/schema"
 	stackService "github.com/llm-observability/platform/packages/platform-orchestrator/src/features/stack/services"
 	"github.com/llm-observability/platform/packages/platform-orchestrator/src/infra/docker"
@@ -62,17 +79,80 @@ func findWorkspaceRoot() string {
 	return "."
 }
 
+func promptInteractiveProfile() []string {
+	fileInfo, _ := os.Stdin.Stat()
+	if (fileInfo.Mode() & os.ModeCharDevice) == 0 {
+		return []string{"full"}
+	}
+
+	fmt.Println("\n=====================================================")
+	fmt.Println("  LLM Observability Infrastructure Stack Selector    ")
+	fmt.Println("=====================================================")
+	fmt.Println("Select the infrastructure stack profile you want to launch:")
+	fmt.Println()
+	fmt.Println("  [1] Full Stack      - All 10 services (Default)")
+	fmt.Println("  [2] Database Stack  - AlloyDB (PostgreSQL) + Redis Ledger")
+	fmt.Println("  [3] Analytics Stack - ClickHouse Analytics DB")
+	fmt.Println("  [4] Streaming Stack - Apache Kafka Event Broker")
+	fmt.Println("  [5] Workflows Engine- Temporal Engine (+ auto-includes Database dependency)")
+	fmt.Println("  [6] Tracing Stack   - Tempo + OpenTelemetry Collector + Grafana UI")
+	fmt.Println("  [7] Network Gateway - Traefik Gateway + Service Registry")
+	fmt.Println("  [8] Stateful Plane  - Dedicated Data Tier (AlloyDB, Kafka, Redis, ClickHouse, Tempo)")
+	fmt.Println("  [9] Stateless Plane - Autoscaled Compute/Edge (Traefik, Registry, OTel, Grafana, Temporal)")
+	fmt.Println("  [10] Custom Profiles- Specify custom profiles (e.g. 'stateful' or 'stateless')")
+	fmt.Println("-----------------------------------------------------")
+	fmt.Print("Enter choice [1-10] (default: 1): ")
+
+	reader := bufio.NewReader(os.Stdin)
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	switch choice {
+	case "2":
+		return []string{"db"}
+	case "3":
+		return []string{"analytics"}
+	case "4":
+		return []string{"streaming"}
+	case "5":
+		return []string{"workflows"}
+	case "6":
+		return []string{"tracing"}
+	case "7":
+		return []string{"network"}
+	case "8":
+		return []string{"stateful"}
+	case "9":
+		return []string{"stateless"}
+	case "10":
+		fmt.Print("Enter profiles separated by space (e.g. db streaming): ")
+		custom, _ := reader.ReadString('\n')
+		custom = strings.TrimSpace(custom)
+		if custom == "" {
+			return []string{"full"}
+		}
+		return strings.Fields(custom)
+	default:
+		return []string{"full"}
+	}
+}
+
 func Execute() {
 	workspaceRoot := findWorkspaceRoot()
 
 	tracer := observability.NewOTelTracerAdapter("llmobs-orchestrator")
 	dockerAdapter := docker.NewDockerAdapter(workspaceRoot)
 
+	prereqSvc := prereqsService.NewPrereqService(tracer)
+	certsSvc := certsService.NewCertService(tracer)
+	portSvc := portsService.NewPortService(dockerAdapter, tracer)
 	stackSvc := stackService.NewStackService(dockerAdapter, dockerAdapter, tracer, workspaceRoot)
 	scaleSvc := scaleService.NewScaleService(dockerAdapter, tracer, workspaceRoot)
 	healthSvc := healthService.NewHealthService(tracer)
-	certsSvc := certsService.NewCertService(tracer)
-	portSvc := portsService.NewPortService(dockerAdapter, tracer)
+	backupSvc := backupService.NewBackupService(dockerAdapter, tracer, workspaceRoot)
+	cloudflareSvc := cloudflareService.NewCloudflareService(dockerAdapter, tracer, workspaceRoot)
+	gdprSvc := gdprService.NewGDPRService(tracer, workspaceRoot)
+	setupSvc := setupService.NewSetupService(prereqSvc, certsSvc, tracer, workspaceRoot)
 
 	restHandler := rest.NewOrchestratorHandler(stackSvc, scaleSvc, healthSvc, certsSvc, workspaceRoot)
 
@@ -88,13 +168,18 @@ func Execute() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
+			profiles := args
+			if len(profiles) == 0 {
+				profiles = promptInteractiveProfile()
+			}
+
 			certSpec := certsSchema.DefaultCertSpec(workspaceRoot)
 			_, _ = certsSvc.EnsureCertificates(ctx, certSpec)
 
 			_ = portSvc.FreePorts(ctx, nil)
 
 			outcome, err := stackSvc.StartStack(ctx, stackSchema.StackUpCommand{
-				Profiles: args,
+				Profiles: profiles,
 				Detach:   true,
 			})
 			if err != nil {
@@ -122,11 +207,17 @@ func Execute() {
 		Use:   "restart [profiles...]",
 		Short: "Restart infrastructure stack",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			outcome, err := stackSvc.RestartStack(context.Background(), args)
+			ctx := context.Background()
+			outcome, err := stackSvc.RestartStack(ctx, args)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("✓ %s (Profiles: %v)\n", outcome.Message, outcome.ActiveServices)
+
+			fmt.Println("\nRunning post-restart health check...")
+			targets := healthSchema.DefaultHealthTargets("localhost")
+			_ = healthSvc.RunHealthChecks(ctx, targets)
+
 			return nil
 		},
 	}
@@ -144,6 +235,32 @@ func Execute() {
 			for _, s := range statuses {
 				fmt.Printf("%-35s %-20s %-25s %s\n", s.Name, s.Service, s.Status, s.Ports)
 			}
+			return nil
+		},
+	}
+
+	logsCmd := &cobra.Command{
+		Use:   "logs [services...]",
+		Short: "Stream container logs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tail, _ := cmd.Flags().GetInt("tail")
+			if tail == 0 {
+				tail = 100
+			}
+			return stackSvc.StreamLogs(context.Background(), tail)
+		},
+	}
+	logsCmd.Flags().IntP("tail", "n", 100, "Number of lines to show from end of logs")
+
+	freePortsCmd := &cobra.Command{
+		Use:   "free-ports",
+		Short: "Clean up conflicting host ports",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			if err := portSvc.FreePorts(ctx, nil); err != nil {
+				return err
+			}
+			fmt.Println("✓ Platform ports verified and ready.")
 			return nil
 		},
 	}
@@ -341,6 +458,159 @@ func Execute() {
 		},
 	}
 
+	backupPurgeCmd := &cobra.Command{
+		Use:   "backup-purge",
+		Short: "Perform database disaster recovery backup and optional volume purge",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			backupOnly, _ := cmd.Flags().GetBool("backup-only")
+			opts := backupSchema.BackupOptions{
+				BackupOnly: backupOnly,
+				Purge:      !backupOnly,
+			}
+			report, err := backupSvc.ExecuteBackupAndPurge(context.Background(), opts)
+			if err != nil {
+				return err
+			}
+			if report.AlloyDBDumpFile != "" {
+				fmt.Printf("✓ AlloyDB backup saved to: %s\n", report.AlloyDBDumpFile)
+			}
+			if report.ClickHouseDumpFile != "" {
+				fmt.Printf("✓ ClickHouse schema & partition freeze saved to: %s\n", report.ClickHouseDumpFile)
+			}
+			fmt.Printf("✓ %s\n", report.Message)
+			return nil
+		},
+	}
+	backupPurgeCmd.Flags().Bool("backup-only", false, "Only dump databases without purging Docker volumes")
+
+	setupCmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Run full 7-step platform bootstrapping pipeline",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pull, _ := cmd.Flags().GetBool("pull")
+			report, err := setupSvc.RunSetupPipeline(context.Background(), pull)
+			for _, st := range report.Steps {
+				if st.Passed {
+					fmt.Printf("  ✓ [%d/7] %s (%v)\n", st.Index, st.Name, st.Duration.Round(time.Millisecond))
+				} else {
+					fmt.Printf("  ✖ [%d/7] %s - ERROR: %s\n", st.Index, st.Name, st.Error)
+				}
+			}
+			if err != nil {
+				return err
+			}
+			fmt.Printf("\n✓ %s (%d/%d steps passed)\n", report.Message, report.PassedSteps, report.TotalSteps)
+			return nil
+		},
+	}
+	setupCmd.Flags().Bool("pull", false, "Pull Docker images during setup")
+
+	cloudflareCmd := &cobra.Command{
+		Use:   "cloudflare [setup|start|stop|status|logs]",
+		Short: "Manage Cloudflare Tunnel ingress",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			action := "setup"
+			if len(args) > 0 {
+				action = args[0]
+			}
+
+			switch action {
+			case "setup":
+				fmt.Print("Enter your Cloudflare Tunnel Token: ")
+				reader := bufio.NewReader(os.Stdin)
+				token, _ := reader.ReadString('\n')
+				token = strings.TrimSpace(token)
+				if token == "" {
+					return fmt.Errorf("tunnel token cannot be empty")
+				}
+				if err := cloudflareSvc.SaveTunnelToken(token); err != nil {
+					return err
+				}
+				fmt.Println("✓ Saved Cloudflare Tunnel Token to .env")
+				rep, err := cloudflareSvc.StartTunnel(ctx)
+				if err != nil {
+					return err
+				}
+				fmt.Println("✓", rep.Message)
+			case "start":
+				rep, err := cloudflareSvc.StartTunnel(ctx)
+				if err != nil {
+					return err
+				}
+				fmt.Println("✓", rep.Message)
+			case "stop":
+				rep, err := cloudflareSvc.StopTunnel(ctx)
+				if err != nil {
+					return err
+				}
+				fmt.Println("✓", rep.Message)
+			case "status":
+				st, err := cloudflareSvc.GetStatus(ctx)
+				if err != nil {
+					return err
+				}
+				fmt.Println(st)
+			case "logs":
+				return cloudflareSvc.StreamLogs(ctx)
+			default:
+				return fmt.Errorf("unknown cloudflare action: %s", action)
+			}
+			return nil
+		},
+	}
+
+	gdprCmd := &cobra.Command{
+		Use:   "gdpr-erasure",
+		Short: "Execute GDPR/CCPA right-to-erasure across databases",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			userID, _ := cmd.Flags().GetString("user-id")
+			customerID, _ := cmd.Flags().GetString("customer-id")
+			if userID == "" && customerID == "" {
+				return fmt.Errorf("must provide --user-id or --customer-id")
+			}
+			report, err := gdprSvc.ExecuteErasure(context.Background(), gdprSchema.ErasureRequest{
+				UserID:     userID,
+				CustomerID: customerID,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("✓ %s (ClickHouse: %v, AlloyDB: %v, Audit: %v)\n", report.Message, report.ClickHousePurged, report.AlloyDBPurged, report.AuditRecorded)
+			return nil
+		},
+	}
+	gdprCmd.Flags().String("user-id", "", "Target User ID for erasure")
+	gdprCmd.Flags().String("customer-id", "", "Target Customer ID for erasure")
+
+	verifyCmd := &cobra.Command{
+		Use:   "verify-credentials [service]",
+		Short: "Verify credentials for local microservices",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			service := "auth"
+			if len(args) > 0 {
+				service = args[0]
+			}
+			scriptPath := filepath.Join(workspaceRoot, "local-services", service, "scripts", "verify-credentials.sh")
+			if _, err := os.Stat(scriptPath); err != nil {
+				pyScript := filepath.Join(workspaceRoot, "local-services", service, "scripts", "verify-credentials.py")
+				if _, errPy := os.Stat(pyScript); errPy == nil {
+					pyCmd := exec.Command("python3", append([]string{pyScript}, args[1:]...)...)
+					pyCmd.Dir = filepath.Dir(pyScript)
+					pyCmd.Stdout = os.Stdout
+					pyCmd.Stderr = os.Stderr
+					return pyCmd.Run()
+				}
+				return fmt.Errorf("verify-credentials script not found for service '%s'", service)
+			}
+			shCmd := exec.Command("bash", append([]string{scriptPath}, args[1:]...)...)
+			shCmd.Dir = filepath.Dir(scriptPath)
+			shCmd.Stdout = os.Stdout
+			shCmd.Stderr = os.Stderr
+			return shCmd.Run()
+		},
+	}
+
 	serverCmd := &cobra.Command{
 		Use:   "server",
 		Short: "Start REST API daemon conforming to OpenAPI specification",
@@ -358,7 +628,23 @@ func Execute() {
 		},
 	}
 
-	rootCmd.AddCommand(upCmd, downCmd, restartCmd, statusCmd, scaleCmd, healthCmd, certsCmd, serverCmd)
+	rootCmd.AddCommand(
+		upCmd,
+		downCmd,
+		restartCmd,
+		statusCmd,
+		logsCmd,
+		freePortsCmd,
+		scaleCmd,
+		healthCmd,
+		certsCmd,
+		backupPurgeCmd,
+		setupCmd,
+		cloudflareCmd,
+		gdprCmd,
+		verifyCmd,
+		serverCmd,
+	)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
