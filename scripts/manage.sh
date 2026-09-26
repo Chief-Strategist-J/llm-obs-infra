@@ -237,13 +237,18 @@ main() {
       setup_script=$(find_required_script "setup.sh" "$scripts_root")
       bash "$setup_script"
       ;;
+    scale)
+      local scale_script
+      scale_script=$(find_required_script "scale-orchestration.sh" "$scripts_root")
+      bash "$scale_script" "$bin" "$compose_file" "$scripts_root" "$pkg_dir" "$@"
+      ;;
     cloudflare)
       local cf_script
       cf_script=$(find_required_script "setup-cloudflare.sh" "$scripts_root")
       bash "$cf_script" "$@"
       ;;
     *)
-      echo "Usage: $0 {up [profile]|restart|down|status|logs|free-ports|health|certs|backup-purge|setup|cloudflare}"
+      echo "Usage: $0 {up [profile]|restart|down|status|logs|scale|free-ports|health|certs|backup-purge|setup|cloudflare}"
       exit 1
       ;;
   esac
