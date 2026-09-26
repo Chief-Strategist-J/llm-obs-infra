@@ -64,9 +64,9 @@ flowchart TD
     C1 -. Traffic split .-> T1
     C2 -. Traffic split .-> T2
 
-    DB1 x--x|"Split-Brain: Unsynchronized Local Data"| DB2
-    K1 x--x|"Partition Silo: Consumer Blindness"| K2
-    R1 x--x|"Lost Updates: Stale Token Counters"| R2
+    DB1 x--x|Split-Brain: Unsynchronized Data| DB2
+    K1 x--x|Partition Silo: Consumer Blindness| K2
+    R1 x--x|Lost Updates: Stale Token Counters| R2
 ```
 
 ---
@@ -103,42 +103,42 @@ flowchart TD
         end
     end
 
-    CF ==>|"Active-Active QUIC Tunnels (Shared Token)"| CFT1
-    CF ==>|"Active-Active QUIC Tunnels (Shared Token)"| CFTN
+    CF ==>|Active-Active QUIC Tunnels| CFT1
+    CF ==>|Active-Active QUIC Tunnels| CFTN
 
     subgraph PrivateVPC["Private Internal Cloud VPC (MTU 1460, Sub-millisecond Latency)"]
         subgraph StatefulPlane["Authoritative Stateful Data Plane (10.0.10.5)"]
             subgraph RelationalDB["Relational Persistence Tier"]
                 PGB["PgBouncer Connection Pooler (:6432)"]
-                ALLOY[("AlloyDB Omni / PostgreSQL 15<br/>Port: 5432 | Columnar: 256MB<br/>Mount: /mnt/disks/alloydb")]
+                ALLOY[("AlloyDB Omni / PostgreSQL 15<br/>Port: 5432, Columnar: 256MB<br/>Mount: /mnt/disks/alloydb")]
                 PGB --> ALLOY
             end
 
             subgraph StreamingBus["Distributed Event Streaming"]
-                KAFKA["Apache Kafka 3.7+ (KRaft Quorum)<br/>Port: 9092 | Partitions >= 3<br/>Mount: /mnt/disks/kafka"]
+                KAFKA["Apache Kafka 3.7+ (KRaft Quorum)<br/>Port: 9092, Partitions >= 3<br/>Mount: /mnt/disks/kafka"]
             end
 
             subgraph InMemCache["In-Memory Ledger & Rate Limiter"]
-                REDIS[("Redis 7 Alpine (AOF everysec)<br/>Port: 6379 | Lua Token Spend<br/>Mount: /mnt/disks/redis")]
+                REDIS[("Redis 7 Alpine (AOF everysec)<br/>Port: 6379, Lua Token Spend<br/>Mount: /mnt/disks/redis")]
             end
 
             subgraph TelemetryAnalytics["Telemetry & Tracing Warehouse"]
-                CH[("ClickHouse v24.8 Columnar DB<br/>Ports: 8123 / 9000<br/>Mount: /mnt/disks/clickhouse")]
-                TEMPO[("Grafana Tempo v2.6+ Tracing<br/>Ports: 3200 / 4317 OTLP<br/>Mount: /mnt/disks/tempo")]
+                CH[("ClickHouse v24.8 Columnar DB<br/>Ports: 8123 and 9000<br/>Mount: /mnt/disks/clickhouse")]
+                TEMPO[("Grafana Tempo v2.6+ Tracing<br/>Ports: 3200 and 4317 OTLP<br/>Mount: /mnt/disks/tempo")]
             end
         end
     end
 
-    APP1 ==>|"TCP :6432 (Transactions)"| PGB
-    APPN ==>|"TCP :6432 (Transactions)"| PGB
-    APP1 ==>|"TCP :9092 (Produce/Consume)"| KAFKA
-    APPN ==>|"TCP :9092 (Produce/Consume)"| KAFKA
-    APP1 ==>|"TCP :6379 (Atomic Lua Spend)"| REDIS
-    APPN ==>|"TCP :6379 (Atomic Lua Spend)"| REDIS
-    OTEL1 ==>|"OTLP gRPC :4317 (Span Flush)"| TEMPO
-    OTELN ==>|"OTLP gRPC :4317 (Span Flush)"| TEMPO
-    APP1 ==>|"HTTP :8123 (Micro-batches)"| CH
-    APPN ==>|"HTTP :8123 (Micro-batches)"| CH
+    APP1 ==>|TCP :6432 Transactions| PGB
+    APPN ==>|TCP :6432 Transactions| PGB
+    APP1 ==>|TCP :9092 Produce and Consume| KAFKA
+    APPN ==>|TCP :9092 Produce and Consume| KAFKA
+    APP1 ==>|TCP :6379 Atomic Token Spend| REDIS
+    APPN ==>|TCP :6379 Atomic Token Spend| REDIS
+    OTEL1 ==>|OTLP gRPC :4317 Span Flush| TEMPO
+    OTELN ==>|OTLP gRPC :4317 Span Flush| TEMPO
+    APP1 ==>|HTTP :8123 Micro-batches| CH
+    APPN ==>|HTTP :8123 Micro-batches| CH
 ```
 
 ---
@@ -270,8 +270,8 @@ sequenceDiagram
 
     rect rgb(250, 240, 255)
         Note over APP,TEMPO: Phase 4: Async Trace Offload
-        APP-)OTEL: Emit Span via OTLP gRPC (:4317)
-        OTEL-)TEMPO: Flush Span Batch to Tempo (:4317)
+        APP-->>OTEL: Emit Span via OTLP gRPC (:4317)
+        OTEL-->>TEMPO: Flush Span Batch to Tempo (:4317)
     end
 ```
 
@@ -512,8 +512,8 @@ flowchart TD
         P_VM2["Compute Node 2 Producer<br/>(acks=all, idempotence=true)"]
     end
 
-    P_VM1 ==>|"Murmur2Hash(Key) % 3"| L0
-    P_VM2 ==>|"Murmur2Hash(Key) % 3"| L1
+    P_VM1 ==>|Murmur2 Hash Modulo 3| L0
+    P_VM2 ==>|Murmur2 Hash Modulo 3| L1
 ```
 
 #### A. Monotonic Quorum & KRaft Protocol
@@ -595,7 +595,7 @@ flowchart TD
     end
 
     subgraph ClickHouseEngine["ClickHouse Database Engine (10.0.10.5)"]
-        BUF["Buffer Engine Table (RAM)<br/>16 Buffers | Max 100k rows | Flush 10s"]
+        BUF["Buffer Engine Table (RAM)<br/>16 Buffers, Max 100k rows, Flush 10s"]
         
         subgraph PartsOnDisk["Persistent Disk Storage (/mnt/disks/clickhouse)"]
             P1["Part 20260926_1_1_0 (Compressed ZSTD)"]
@@ -655,8 +655,8 @@ sequenceDiagram
     Kafka->>Worker: Consume Event Record
     Note over Worker: Extracts traceparent from RecordHeaders<br/>Child Span: "worker.process_event"<br/>parent_id: API Span ID
     Worker->>Worker: Execute Async Processing
-    Worker-)OTel: Flush Span Context
-    OTel-)Tempo: Stream Traces (:4317 OTLP)
+    Worker-->>OTel: Flush Span Context
+    OTel-->>Tempo: Stream Traces (:4317 OTLP)
     Note over Tempo: Merges spans into single contiguous trace waterfall
 ```
 
