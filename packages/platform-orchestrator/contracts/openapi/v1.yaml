@@ -1,0 +1,389 @@
+openapi: 3.1.0
+info:
+  title: Platform Infrastructure Orchestrator API
+  version: 1.0.0
+  description: >-
+    Authoritative OpenAPI specification for the Platform Infrastructure Orchestrator,
+    governing container stack lifecycles, autoscaling simulation, health verification,
+    and cryptographic certificate lifecycle management.
+servers:
+  - url: http://localhost:31499/api/v1
+    description: Local Platform Orchestrator Daemon
+
+paths:
+  /stack/up:
+    post:
+      summary: Start Infrastructure Stack
+      operationId: startStack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StackUpRequest'
+      responses:
+        '200':
+          description: Stack successfully initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StackActionResponse'
+        '400':
+          $ref: '#/components/responses/StandardErrorResponse'
+        '500':
+          $ref: '#/components/responses/StandardErrorResponse'
+
+  /stack/down:
+    post:
+      summary: Stop Infrastructure Stack
+      operationId: stopStack
+      responses:
+        '200':
+          description: Stack successfully stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StackActionResponse'
+        '500':
+          $ref: '#/components/responses/StandardErrorResponse'
+
+  /stack/status:
+    get:
+      summary: Get Infrastructure Stack Status
+      operationId: getStackStatus
+      responses:
+        '200':
+          description: Active container services status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StackStatusResponse'
+
+  /scale/service:
+    post:
+      summary: Scale a Stateless Service
+      operationId: scaleService
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScaleServiceRequest'
+      responses:
+        '200':
+          description: Service replica count updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaleServiceResponse'
+        '400':
+          $ref: '#/components/responses/StandardErrorResponse'
+
+  /scale/node:
+    post:
+      summary: Launch Simulated Compute Node
+      operationId: launchComputeNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LaunchComputeNodeRequest'
+      responses:
+        '200':
+          description: Compute node successfully launched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LaunchComputeNodeResponse'
+        '400':
+          $ref: '#/components/responses/StandardErrorResponse'
+
+  /scale/node/{nodeId}:
+    delete:
+      summary: Terminate Simulated Compute Node
+      operationId: terminateComputeNode
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Compute node successfully terminated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StackActionResponse'
+
+  /health:
+    get:
+      summary: Run Concurrent Health Checks
+      operationId: checkPlatformHealth
+      responses:
+        '200':
+          description: Health check report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReportResponse'
+
+  /certs/generate:
+    post:
+      summary: Generate Platform TLS Certificates
+      operationId: generateCerts
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateCertsRequest'
+      responses:
+        '200':
+          description: Certificates successfully generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateCertsResponse'
+
+components:
+  responses:
+    StandardErrorResponse:
+      description: Standard API Error Envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+
+  schemas:
+    MetaEnvelope:
+      type: object
+      required:
+        - traceId
+        - timestamp
+        - version
+      properties:
+        traceId:
+          type: string
+          example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+          example: v1
+
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: ERR_INVALID_PROFILE
+        message:
+          type: string
+          example: Requested profile does not exist.
+        target:
+          type: string
+
+    ApiErrorEnvelope:
+      type: object
+      required:
+        - meta
+        - errors
+      properties:
+        meta:
+          $ref: '#/components/schemas/MetaEnvelope'
+        data:
+          type: object
+          nullable: true
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiError'
+
+    StackUpRequest:
+      type: object
+      properties:
+        profiles:
+          type: array
+          items:
+            type: string
+          example: ["stateless", "compute"]
+        detach:
+          type: boolean
+          default: true
+
+    StackActionResponse:
+      type: object
+      required:
+        - meta
+        - data
+      properties:
+        meta:
+          $ref: '#/components/schemas/MetaEnvelope'
+        data:
+          type: object
+          properties:
+            message:
+              type: string
+            status:
+              type: string
+            activeServices:
+              type: array
+              items:
+                type: string
+
+    StackStatusResponse:
+      type: object
+      required:
+        - meta
+        - data
+      properties:
+        meta:
+          $ref: '#/components/schemas/MetaEnvelope'
+        data:
+          type: object
+          properties:
+            services:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  status:
+                    type: string
+                  ports:
+                    type: string
+
+    ScaleServiceRequest:
+      type: object
+      required:
+        - service
+        - replicas
+      properties:
+        service:
+          type: string
+          example: llmobs-temporal
+        replicas:
+          type: integer
+          minimum: 1
+          example: 3
+
+    ScaleServiceResponse:
+      type: object
+      required:
+        - meta
+        - data
+      properties:
+        meta:
+          $ref: '#/components/schemas/MetaEnvelope'
+        data:
+          type: object
+          properties:
+            service:
+              type: string
+            replicas:
+              type: integer
+            message:
+              type: string
+
+    LaunchComputeNodeRequest:
+      type: object
+      required:
+        - nodeId
+      properties:
+        nodeId:
+          type: integer
+          minimum: 2
+          example: 2
+        primaryDataHost:
+          type: string
+          default: host.docker.internal
+        enableCloudflare:
+          type: boolean
+          default: false
+
+    LaunchComputeNodeResponse:
+      type: object
+      required:
+        - meta
+        - data
+      properties:
+        meta:
+          $ref: '#/components/schemas/MetaEnvelope'
+        data:
+          type: object
+          properties:
+            nodeId:
+              type: integer
+            projectName:
+              type: string
+            primaryDataHost:
+              type: string
+            assignedPorts:
+              type: object
+              additionalProperties:
+                type: integer
+
+    HealthReportResponse:
+      type: object
+      required:
+        - meta
+        - data
+      properties:
+        meta:
+          $ref: '#/components/schemas/MetaEnvelope'
+        data:
+          type: object
+          properties:
+            healthy:
+              type: boolean
+            checkedCount:
+              type: integer
+            results:
+              type: array
+              items:
+                type: object
+                properties:
+                  service:
+                    type: string
+                  target:
+                    type: string
+                  status:
+                    type: string
+                  latencyMs:
+                    type: number
+
+    GenerateCertsRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
+          default: false
+        domains:
+          type: array
+          items:
+            type: string
+
+    GenerateCertsResponse:
+      type: object
+      required:
+        - meta
+        - data
+      properties:
+        meta:
+          $ref: '#/components/schemas/MetaEnvelope'
+        data:
+          type: object
+          properties:
+            certPath:
+              type: string
+            keyPath:
+              type: string
+            generated:
+              type: boolean

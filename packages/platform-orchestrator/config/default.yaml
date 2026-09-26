@@ -1,0 +1,19 @@
+server:
+  port: 31499
+  readTimeout: 15s
+  writeTimeout: 60s
+
+docker:
+  network: "llmobs-network"
+  composeFile: "docker-compose.yml"
+  statelessFile: "docker-compose.stateless.yml"
+  prodFile: "docker-compose.prod.yml"
+  cloudflareFile: "docker-compose.cloudflare.yml"
+
+orchestrator:
+  defaultProfiles: ["full"]
+  dataDir: "./data"
+  primaryDataHost: "localhost"
+  portRange:
+    start: 31410
+    end: 31426

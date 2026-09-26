@@ -1,0 +1,5 @@
+server:
+  port: 31499
+orchestrator:
+  defaultProfiles: ["full"]
+  primaryDataHost: "localhost"

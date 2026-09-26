@@ -1,0 +1,5 @@
+server:
+  port: 31499
+orchestrator:
+  defaultProfiles: ["stateless", "compute"]
+  dataDir: "/mnt/disks/llmobs-data"
