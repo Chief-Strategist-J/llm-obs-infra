@@ -103,7 +103,7 @@ else
 fi
 
 verify_services() {
-  local check_flag="${VERIFY_CHECK:-}"
+  local check_flag="${VERIFY_CHECK:-${PROFILES_CSV:-}}"
   local check_arg=""
   if [ -n "$check_flag" ]; then
     check_arg="--check $check_flag"
