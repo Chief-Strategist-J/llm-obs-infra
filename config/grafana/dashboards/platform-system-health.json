@@ -1,0 +1,67 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "platform-system-health",
+    "title": "Platform Infrastructure & Service Health",
+    "tags": ["infrastructure", "health", "system", "llmobs"],
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "version": 1,
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+        "type": "stat",
+        "title": "AlloyDB PostgreSQL Status",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "P6B4061E33323478E"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT 1 as is_online",
+            "format": "table"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+        "type": "stat",
+        "title": "ClickHouse Analytics Engine Status",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT 1 as is_online",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+        "type": "stat",
+        "title": "Redis Ledger Status",
+        "datasource": {
+          "type": "redis-datasource",
+          "uid": "PA7F6415749A3297A"
+        },
+        "targets": [
+          {
+            "command": "ping",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

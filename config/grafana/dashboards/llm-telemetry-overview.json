@@ -1,0 +1,131 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "llm-telemetry-overview",
+    "title": "LLM Telemetry & Span Traces",
+    "tags": ["llm", "telemetry", "tracing", "llmobs"],
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "version": 1,
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+        "type": "stat",
+        "title": "Total LLM Invocations",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT count() as total_calls FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+        "type": "stat",
+        "title": "P95 Latency (ms)",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT quantile(0.95)(duration_ms) as p95_latency FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+        "type": "stat",
+        "title": "Error Rate",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT (countIf(status_code != 'OK') / count()) * 100 as error_rate FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+        "type": "stat",
+        "title": "Active Models",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT uniq(model_name) as active_models FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "gridPos": { "h": 8, "w": 16, "x": 0, "y": 4 },
+        "type": "timeseries",
+        "title": "LLM Requests & Latency Distribution",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS time, avg(duration_ms) AS avg_duration, quantile(0.95)(duration_ms) AS p95_duration FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 4 },
+        "type": "piechart",
+        "title": "Model Distribution",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT model_name, count() as invocations FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY model_name ORDER BY invocations DESC",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "gridPos": { "h": 10, "w": 24, "x": 0, "y": 12 },
+        "type": "table",
+        "title": "Recent LLM Traces & Telemetry Spans",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT timestamp, trace_id, span_id, model_name, prompt_tokens, completion_tokens, total_tokens, duration_ms, status_code FROM telemetry_spans ORDER BY timestamp DESC LIMIT 50",
+            "format": 1
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

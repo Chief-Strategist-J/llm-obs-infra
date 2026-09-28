@@ -1,0 +1,115 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "llm-token-cost-analytics",
+    "title": "LLM Token Spend & Cost Analytics",
+    "tags": ["llm", "tokens", "cost", "spend", "llmobs"],
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "version": 1,
+    "refresh": "10s",
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+        "type": "stat",
+        "title": "Total Tokens Consumed",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT sum(total_tokens) as total_tokens FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+        "type": "stat",
+        "title": "Prompt Tokens",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT sum(prompt_tokens) as prompt_tokens FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+        "type": "stat",
+        "title": "Completion Tokens",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT sum(completion_tokens) as completion_tokens FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+        "type": "stat",
+        "title": "Est. Total Cost ($ USD)",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT round(sum(cost_usd), 4) as total_cost FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "gridPos": { "h": 8, "w": 14, "x": 0, "y": 4 },
+        "type": "timeseries",
+        "title": "Token Burn Rate Over Time",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT toStartOfInterval(timestamp, INTERVAL 5 MINUTE) AS time, sum(prompt_tokens) AS prompt_tokens, sum(completion_tokens) AS completion_tokens FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+            "format": 1
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "gridPos": { "h": 8, "w": 10, "x": 14, "y": 4 },
+        "type": "barchart",
+        "title": "Spend by Model ($ USD)",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "targets": [
+          {
+            "rawSql": "SELECT model_name, sum(cost_usd) as model_spend FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY model_name ORDER BY model_spend DESC",
+            "format": 1
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}
