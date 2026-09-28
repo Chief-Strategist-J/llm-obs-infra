@@ -155,8 +155,13 @@ case "$ACTION" in
       echo -e "${BLUE}▶ Starting infrastructure (interactive — set INFRA_PROFILES in $TARGET_SERVICE/.env to skip this)...${NC}"
       "$BIN" up
     fi
-    echo -e "\n${BLUE}▶ Verifying infrastructure health...${NC}"
-    "$BIN" health
+    PROFILES_CSV=$(echo "$PROFILES" | tr ' ' ',')
+    echo -e "\n${BLUE}▶ Verifying infrastructure health (scoped to: ${BOLD}${PROFILES_CSV:-all}${NC})...${NC}"
+    if [ -n "$PROFILES_CSV" ]; then
+      "$BIN" health --profiles "$PROFILES_CSV"
+    else
+      "$BIN" health
+    fi
     echo -e "\n${BLUE}▶ Verifying credentials & connectivity for ${BOLD}$TARGET_SERVICE${NC}...${NC}"
     verify_services
     echo -e "\n${GREEN}✓ Infrastructure for ${BOLD}$TARGET_SERVICE${NC} is operational and verified.${NC}"
@@ -175,7 +180,12 @@ case "$ACTION" in
       echo -e "${BLUE}⟳ Restarting infrastructure (interactive — set INFRA_PROFILES in $TARGET_SERVICE/.env to skip this)...${NC}"
       "$BIN" restart
     fi
-    "$BIN" health
+    PROFILES_CSV=$(echo "$PROFILES" | tr ' ' ',')
+    if [ -n "$PROFILES_CSV" ]; then
+      "$BIN" health --profiles "$PROFILES_CSV"
+    else
+      "$BIN" health
+    fi
     verify_services
     ;;
 
