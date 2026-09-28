@@ -129,7 +129,11 @@ resolve_profiles() {
   local env_profiles=""
   for env_file in "$svc_dir/.env" "$svc_dir/.env.example"; do
     if [ -f "$env_file" ]; then
-      env_profiles=$(grep -E '^INFRA_PROFILES=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'"'"' ')
+      env_profiles=$(grep -E '^INFRA_PROFILES=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2-)
+      # Strip surrounding quotes only — preserve spaces between profile names
+      env_profiles="${env_profiles#\"}" ; env_profiles="${env_profiles%\"}"
+      env_profiles="${env_profiles#\'}" ; env_profiles="${env_profiles%\'}"
+      env_profiles="${env_profiles# }"  ; env_profiles="${env_profiles% }"
       if [ -n "$env_profiles" ]; then
         echo "$env_profiles"
         return
@@ -174,6 +178,7 @@ case "$ACTION" in
     "$BIN" health
     verify_services
     ;;
+
 
   status|ps)
     "$BIN" status
