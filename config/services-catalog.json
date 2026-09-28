@@ -1,5 +1,116 @@
 {
   "version": "1.0.0",
-  "services": {},
-  "updatedAt": "2026-09-28T12:05:59.886747841Z"
+  "services": {
+    "anthropic-claude": {
+      "id": "anthropic-claude",
+      "name": "Anthropic-Claude",
+      "category": "llm",
+      "type": "anthropic",
+      "url": "https://api.anthropic.com/v1",
+      "healthCheck": {
+        "type": "http",
+        "method": "GET",
+        "expectedStatus": 200,
+        "timeoutSec": 5
+      },
+      "auth": {
+        "type": ""
+      },
+      "createdAt": "2026-09-28T12:56:36.243308894Z",
+      "updatedAt": "2026-09-28T12:56:36.243309116Z"
+    },
+    "ollama-local": {
+      "id": "ollama-local",
+      "name": "Ollama-Local",
+      "category": "llm",
+      "type": "ollama",
+      "url": "http://localhost:11434",
+      "healthCheck": {
+        "type": "http",
+        "method": "GET",
+        "expectedStatus": 200,
+        "timeoutSec": 5
+      },
+      "auth": {
+        "type": ""
+      },
+      "createdAt": "2026-09-28T12:56:36.25411993Z",
+      "updatedAt": "2026-09-28T12:56:36.254120018Z"
+    },
+    "openai-api": {
+      "id": "openai-api",
+      "name": "OpenAI-API",
+      "category": "llm",
+      "type": "openai",
+      "url": "https://api.openai.com/v1",
+      "healthCheck": {
+        "type": "http",
+        "method": "GET",
+        "expectedStatus": 200,
+        "timeoutSec": 5
+      },
+      "auth": {
+        "type": ""
+      },
+      "createdAt": "2026-09-28T12:56:36.229869557Z",
+      "updatedAt": "2026-09-28T12:56:36.229869647Z"
+    },
+    "production-clickhouse": {
+      "id": "production-clickhouse",
+      "name": "Production-ClickHouse",
+      "category": "database",
+      "type": "clickhouse",
+      "host": "127.0.0.1",
+      "port": 31422,
+      "database": "llm_telemetry_analytics",
+      "healthCheck": {
+        "type": "tcp",
+        "expectedStatus": 200,
+        "timeoutSec": 5
+      },
+      "auth": {
+        "type": ""
+      },
+      "createdAt": "2026-09-28T12:56:36.264774066Z",
+      "updatedAt": "2026-09-28T12:56:36.264774143Z"
+    },
+    "production-postgresql": {
+      "id": "production-postgresql",
+      "name": "Production-PostgreSQL",
+      "category": "database",
+      "type": "postgres",
+      "host": "127.0.0.1",
+      "port": 31420,
+      "database": "llm_observability",
+      "healthCheck": {
+        "type": "tcp",
+        "expectedStatus": 200,
+        "timeoutSec": 5
+      },
+      "auth": {
+        "type": ""
+      },
+      "createdAt": "2026-09-28T12:56:36.274238924Z",
+      "updatedAt": "2026-09-28T12:56:36.274239001Z"
+    },
+    "qdrant-vector-store": {
+      "id": "qdrant-vector-store",
+      "name": "Qdrant-Vector-Store",
+      "category": "vector-db",
+      "type": "qdrant",
+      "url": "http://localhost:6333",
+      "healthCheck": {
+        "type": "http",
+        "method": "GET",
+        "expectedStatus": 200,
+        "timeoutSec": 5
+      },
+      "auth": {
+        "type": ""
+      },
+      "createdAt": "2026-09-28T12:56:36.282582774Z",
+      "updatedAt": "2026-09-28T12:56:36.282582846Z"
+    }
+  },
+  "updatedAt": "2026-09-28T12:56:36.282940771Z"
 }

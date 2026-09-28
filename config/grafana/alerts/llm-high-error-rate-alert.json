@@ -1,0 +1,111 @@
+{
+  "uid": "llm-high-error-rate-alert",
+  "title": "LLM High Error Rate Alert (>5%)",
+  "ruleGroup": "llm-observability-rules",
+  "folderUID": "llmobs-alerts",
+  "condition": "C",
+  "data": [
+    {
+      "refId": "A",
+      "queryType": "",
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
+      "datasourceUid": "PDEE91DDB90597936",
+      "model": {
+        "rawSql": "SELECT toStartOfMinute(timestamp) as time, (countIf(status_code != 'OK') / count()) * 100 as error_rate FROM telemetry_spans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+        "format": 1,
+        "refId": "A"
+      }
+    },
+    {
+      "refId": "B",
+      "queryType": "",
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
+      "datasourceUid": "__expr__",
+      "model": {
+        "conditions": [
+          {
+            "evaluator": {
+              "params": [5],
+              "type": "gt"
+            },
+            "operator": {
+              "type": "and"
+            },
+            "query": {
+              "params": ["B"]
+            },
+            "reducer": {
+              "params": [],
+              "type": "last"
+            },
+            "type": "query"
+          }
+        ],
+        "datasource": {
+          "name": "Expression",
+          "type": "__expr__",
+          "uid": "__expr__"
+        },
+        "expression": "A",
+        "reducer": "last",
+        "refId": "B",
+        "type": "reduce"
+      }
+    },
+    {
+      "refId": "C",
+      "queryType": "",
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
+      "datasourceUid": "__expr__",
+      "model": {
+        "conditions": [
+          {
+            "evaluator": {
+              "params": [5],
+              "type": "gt"
+            },
+            "operator": {
+              "type": "and"
+            },
+            "query": {
+              "params": ["C"]
+            },
+            "reducer": {
+              "params": [],
+              "type": "last"
+            },
+            "type": "query"
+          }
+        ],
+        "datasource": {
+          "name": "Expression",
+          "type": "__expr__",
+          "uid": "__expr__"
+        },
+        "expression": "$B > 5",
+        "refId": "C",
+        "type": "math"
+      }
+    }
+  ],
+  "noDataState": "OK",
+  "execErrState": "Error",
+  "for": "5m",
+  "annotations": {
+    "summary": "LLM model error rate exceeded 5% threshold",
+    "description": "More than 5% of LLM API inference requests resulted in an error status code over the last 5 minutes."
+  },
+  "labels": {
+    "severity": "critical",
+    "team": "ai-ops"
+  }
+}
