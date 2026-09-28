@@ -13,21 +13,6 @@ BIN="$REPO_ROOT/bin/llmobs"
 
 KNOWN_SERVICES=("user" "audit" "auth" "notifications" "payment" "storage")
 
-# ─── Service → Required Infrastructure Profiles ───────────────────────────────
-# Maps each microservice to the minimal set of Docker Compose profiles it needs.
-#   db        → AlloyDB (PostgreSQL) + Redis Ledger
-#   streaming → Apache Kafka Event Broker
-#   analytics → ClickHouse Analytics DB
-#   tracing   → Tempo + OTel Collector + Grafana UI
-#   full      → All 10 services (used for 'all' target only)
-# ──────────────────────────────────────────────────────────────────────────────
-declare -A SERVICE_PROFILES
-SERVICE_PROFILES["user"]="db streaming tracing"
-SERVICE_PROFILES["audit"]="db streaming analytics tracing"
-SERVICE_PROFILES["auth"]="db"
-SERVICE_PROFILES["notifications"]="db streaming tracing"
-SERVICE_PROFILES["payment"]="db streaming"
-SERVICE_PROFILES["storage"]="db tracing"
 
 # Colors
 GREEN='\033[0;32m'
@@ -118,28 +103,34 @@ else
 fi
 
 verify_services() {
+  local check_flag="${VERIFY_CHECK:-}"
+  local check_arg=""
+  if [ -n "$check_flag" ]; then
+    check_arg="--check $check_flag"
+  fi
   if [ "$TARGET_SERVICE" = "all" ]; then
     for s in "${KNOWN_SERVICES[@]}"; do
-      "$BIN" verify-credentials "$s"
+      # shellcheck disable=SC2086
+      "$BIN" verify-credentials "$s" $check_arg
     done
   else
-    "$BIN" verify-credentials "$TARGET_SERVICE"
+    # shellcheck disable=SC2086
+    "$BIN" verify-credentials "$TARGET_SERVICE" $check_arg
   fi
 }
 
 case "$ACTION" in
   up|start)
-    if [ -n "$1" ]; then
+    if [ -n "$*" ]; then
       PROFILES="$*"
-    elif [ "$TARGET_SERVICE" = "all" ]; then
-      PROFILES="full"
+      echo -e "${BLUE}▶ Starting infrastructure for ${BOLD}$TARGET_SERVICE${NC} (Profiles: $PROFILES)...${NC}"
+      # shellcheck disable=SC2086
+      "$BIN" up $PROFILES
     else
-      PROFILES="${SERVICE_PROFILES[$TARGET_SERVICE]:-db}"
+      echo -e "${BLUE}▶ Starting infrastructure for ${BOLD}$TARGET_SERVICE${NC} (interactive profile selector)...${NC}"
+      "$BIN" up
     fi
-    echo -e "${BLUE}▶ Starting infrastructure for ${BOLD}$TARGET_SERVICE${NC} (Profiles: $PROFILES)...${NC}"
-    # shellcheck disable=SC2086
-    "$BIN" up $PROFILES
-    echo -e "\n${BLUE}▶ Verifying infrastructure health across platform endpoints...${NC}"
+    echo -e "\n${BLUE}▶ Verifying infrastructure health...${NC}"
     "$BIN" health
     echo -e "\n${BLUE}▶ Verifying credentials & connectivity for ${BOLD}$TARGET_SERVICE${NC}...${NC}"
     verify_services
@@ -150,16 +141,15 @@ case "$ACTION" in
     "$BIN" down
     ;;
   restart)
-    if [ -n "$1" ]; then
+    if [ -n "$*" ]; then
       PROFILES="$*"
-    elif [ "$TARGET_SERVICE" = "all" ]; then
-      PROFILES="full"
+      echo -e "${BLUE}⟳ Restarting infrastructure (Profiles: $PROFILES)...${NC}"
+      # shellcheck disable=SC2086
+      "$BIN" restart $PROFILES
     else
-      PROFILES="${SERVICE_PROFILES[$TARGET_SERVICE]:-db}"
+      echo -e "${BLUE}⟳ Restarting infrastructure (interactive)...${NC}"
+      "$BIN" restart
     fi
-    echo -e "${BLUE}⟳ Restarting infrastructure (Profiles: $PROFILES)...${NC}"
-    # shellcheck disable=SC2086
-    "$BIN" restart $PROFILES
     "$BIN" health
     verify_services
     ;;
@@ -183,38 +173,43 @@ case "$ACTION" in
     echo "LLMObs Local Services Unified Runner"
     echo ""
     echo "Usage:"
-    echo "  $0 [service] [command] [args...]"
+    echo "  $0 [target] [command] [profiles...]"
     echo ""
-    echo "Services:"
+    echo "Targets:"
     echo "  user | audit | auth | notifications | payment | storage | all"
+    echo "  (or any arbitrary label matching a local-services/<label>/.env)"
     echo ""
     echo "Commands:"
-    echo "  up [profiles]    Start only the required infrastructure, check health, and verify credentials"
-    echo "  down             Stop all infrastructure containers"
-    echo "  restart [prof]   Restart infrastructure and re-verify"
-    echo "  status           Show container statuses"
-    echo "  health           Check platform endpoint health and verify service dependencies"
-    echo "  verify           Verify database and cache credentials"
-    echo "  logs [tail]      Stream infrastructure container logs"
-    echo "  config [args]    Inspect or tune Docker resource limits"
+    echo "  up [profiles...]     Start specified infrastructure profiles, then verify"
+    echo "  down                 Stop all infrastructure containers"
+    echo "  restart [profiles..]  Restart profiles and re-verify"
+    echo "  status               Show container statuses"
+    echo "  health               Health check all platform endpoints"
+    echo "  verify               Verify credentials only (no infra start)"
+    echo "  logs                 Stream container logs"
+    echo "  config               Inspect or tune resource limits"
     echo ""
-    echo "Service → Auto-resolved profiles (minimal infra only):"
-    echo "  user          → db streaming tracing   (AlloyDB, Redis, Kafka, OTel, Tempo, Grafana)"
-    echo "  audit         → db streaming analytics tracing"
-    echo "  auth          → db                     (AlloyDB, Redis only)"
-    echo "  notifications → db streaming tracing"
-    echo "  payment       → db streaming           (AlloyDB, Redis, Kafka)"
-    echo "  storage       → db tracing             (AlloyDB, Redis, OTel, Tempo, Grafana)"
-    echo "  all           → full                   (all 10 services)"
+    echo "Infrastructure profiles (passed directly to 'llmobs up'):"
+    echo "  db          AlloyDB (PostgreSQL) + Redis Ledger"
+    echo "  streaming   Apache Kafka Event Broker"
+    echo "  analytics   ClickHouse Analytics DB"
+    echo "  tracing     Tempo + OTel Collector + Grafana"
+    echo "  network     Traefik Gateway + Service Registry"
+    echo "  stateful    All stateful services"
+    echo "  stateless   All stateless services"
+    echo "  full        All 10 services"
+    echo ""
+    echo "Verify options (passed to 'llmobs verify-credentials'):"
+    echo "  VERIFY_CHECK=db,redis  $0 user verify   # scope credential checks"
     echo ""
     echo "Examples:"
-    echo "  $0 user up             # Start only db+streaming+tracing for user service"
-    echo "  $0 auth up             # Start only db profile (AlloyDB + Redis)"
-    echo "  $0 user up db          # Override: start only db profile for user"
-    echo "  $0 auth verify         # Verify auth service credentials"
-    echo "  $0 all up              # Start full stack and verify all 6 services"
-    echo "  $0 all health          # Health check and verify all services"
-    echo "  $0 down                # Stop all infrastructure"
+    echo "  $0 user up db streaming        # start only db+streaming for user target"
+    echo "  $0 auth up db                  # start only db profile for auth target"
+    echo "  $0 user up                     # interactive llmobs profile selector"
+    echo "  $0 all up full                 # start all 10 services"
+    echo "  $0 auth verify                 # verify credentials for auth target"
+    echo "  VERIFY_CHECK=db $0 user verify # verify only db component"
+    echo "  $0 down                        # stop all infrastructure"
     ;;
   *)
     echo "Unknown command: $ACTION"
