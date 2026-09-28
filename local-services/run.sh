@@ -194,7 +194,15 @@ case "$ACTION" in
     "$BIN" status
     ;;
   health|check)
-    "$BIN" health
+    PROFILES=$(resolve_profiles "$@")
+    PROFILES_CSV=$(echo "$PROFILES" | tr ' ' ',')
+    echo -e "${BLUE}▶ Running deep health verification (scoped to: ${BOLD}${PROFILES_CSV:-all}${NC})...${NC}"
+    if [ -n "$PROFILES_CSV" ]; then
+      "$BIN" health --profiles "$PROFILES_CSV"
+    else
+      "$BIN" health
+    fi
+    echo -e "\n${BLUE}▶ Verifying credentials & connectivity for ${BOLD}$TARGET_SERVICE${NC}...${NC}"
     verify_services
     ;;
   verify)
