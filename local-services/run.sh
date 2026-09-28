@@ -13,6 +13,22 @@ BIN="$REPO_ROOT/bin/llmobs"
 
 KNOWN_SERVICES=("user" "audit" "auth" "notifications" "payment" "storage")
 
+# ─── Service → Required Infrastructure Profiles ───────────────────────────────
+# Maps each microservice to the minimal set of Docker Compose profiles it needs.
+#   db        → AlloyDB (PostgreSQL) + Redis Ledger
+#   streaming → Apache Kafka Event Broker
+#   analytics → ClickHouse Analytics DB
+#   tracing   → Tempo + OTel Collector + Grafana UI
+#   full      → All 10 services (used for 'all' target only)
+# ──────────────────────────────────────────────────────────────────────────────
+declare -A SERVICE_PROFILES
+SERVICE_PROFILES["user"]="db streaming tracing"
+SERVICE_PROFILES["audit"]="db streaming analytics tracing"
+SERVICE_PROFILES["auth"]="db"
+SERVICE_PROFILES["notifications"]="db streaming tracing"
+SERVICE_PROFILES["payment"]="db streaming"
+SERVICE_PROFILES["storage"]="db tracing"
+
 # Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -113,8 +129,15 @@ verify_services() {
 
 case "$ACTION" in
   up|start)
-    PROFILES="${1:-full}"
+    if [ -n "$1" ]; then
+      PROFILES="$*"
+    elif [ "$TARGET_SERVICE" = "all" ]; then
+      PROFILES="full"
+    else
+      PROFILES="${SERVICE_PROFILES[$TARGET_SERVICE]:-db}"
+    fi
     echo -e "${BLUE}▶ Starting infrastructure for ${BOLD}$TARGET_SERVICE${NC} (Profiles: $PROFILES)...${NC}"
+    # shellcheck disable=SC2086
     "$BIN" up $PROFILES
     echo -e "\n${BLUE}▶ Verifying infrastructure health across platform endpoints...${NC}"
     "$BIN" health
@@ -127,8 +150,15 @@ case "$ACTION" in
     "$BIN" down
     ;;
   restart)
-    PROFILES="${1:-full}"
+    if [ -n "$1" ]; then
+      PROFILES="$*"
+    elif [ "$TARGET_SERVICE" = "all" ]; then
+      PROFILES="full"
+    else
+      PROFILES="${SERVICE_PROFILES[$TARGET_SERVICE]:-db}"
+    fi
     echo -e "${BLUE}⟳ Restarting infrastructure (Profiles: $PROFILES)...${NC}"
+    # shellcheck disable=SC2086
     "$BIN" restart $PROFILES
     "$BIN" health
     verify_services
@@ -159,7 +189,7 @@ case "$ACTION" in
     echo "  user | audit | auth | notifications | payment | storage | all"
     echo ""
     echo "Commands:"
-    echo "  up [profiles]    Start infrastructure, check health, and verify credentials"
+    echo "  up [profiles]    Start only the required infrastructure, check health, and verify credentials"
     echo "  down             Stop all infrastructure containers"
     echo "  restart [prof]   Restart infrastructure and re-verify"
     echo "  status           Show container statuses"
@@ -168,12 +198,23 @@ case "$ACTION" in
     echo "  logs [tail]      Stream infrastructure container logs"
     echo "  config [args]    Inspect or tune Docker resource limits"
     echo ""
+    echo "Service → Auto-resolved profiles (minimal infra only):"
+    echo "  user          → db streaming tracing   (AlloyDB, Redis, Kafka, OTel, Tempo, Grafana)"
+    echo "  audit         → db streaming analytics tracing"
+    echo "  auth          → db                     (AlloyDB, Redis only)"
+    echo "  notifications → db streaming tracing"
+    echo "  payment       → db streaming           (AlloyDB, Redis, Kafka)"
+    echo "  storage       → db tracing             (AlloyDB, Redis, OTel, Tempo, Grafana)"
+    echo "  all           → full                   (all 10 services)"
+    echo ""
     echo "Examples:"
-    echo "  $0 user up             # Start full stack and verify user service"
-    echo "  $0 auth verify          # Verify auth service credentials"
-    echo "  $0 all up               # Start full stack and verify all 6 services"
-    echo "  $0 all health           # Health check and verify all services"
-    echo "  $0 down                 # Stop infrastructure"
+    echo "  $0 user up             # Start only db+streaming+tracing for user service"
+    echo "  $0 auth up             # Start only db profile (AlloyDB + Redis)"
+    echo "  $0 user up db          # Override: start only db profile for user"
+    echo "  $0 auth verify         # Verify auth service credentials"
+    echo "  $0 all up              # Start full stack and verify all 6 services"
+    echo "  $0 all health          # Health check and verify all services"
+    echo "  $0 down                # Stop all infrastructure"
     ;;
   *)
     echo "Unknown command: $ACTION"
