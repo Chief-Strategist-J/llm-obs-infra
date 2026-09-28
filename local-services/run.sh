@@ -119,15 +119,36 @@ verify_services() {
   fi
 }
 
+resolve_profiles() {
+  # Priority: CLI args > service .env INFRA_PROFILES > service .env.example INFRA_PROFILES > interactive
+  if [ -n "$*" ]; then
+    echo "$*"
+    return
+  fi
+  local svc_dir="$SCRIPT_DIR/$TARGET_SERVICE"
+  local env_profiles=""
+  for env_file in "$svc_dir/.env" "$svc_dir/.env.example"; do
+    if [ -f "$env_file" ]; then
+      env_profiles=$(grep -E '^INFRA_PROFILES=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'"'"' ')
+      if [ -n "$env_profiles" ]; then
+        echo "$env_profiles"
+        return
+      fi
+    fi
+  done
+  # Nothing configured — fall through to llmobs interactive selector
+  echo ""
+}
+
 case "$ACTION" in
   up|start)
-    if [ -n "$*" ]; then
-      PROFILES="$*"
-      echo -e "${BLUE}▶ Starting infrastructure for ${BOLD}$TARGET_SERVICE${NC} (Profiles: $PROFILES)...${NC}"
+    PROFILES=$(resolve_profiles "$@")
+    if [ -n "$PROFILES" ]; then
+      echo -e "${BLUE}▶ Starting infrastructure for ${BOLD}$TARGET_SERVICE${NC} (Profiles: ${BOLD}$PROFILES${NC})...${NC}"
       # shellcheck disable=SC2086
       "$BIN" up $PROFILES
     else
-      echo -e "${BLUE}▶ Starting infrastructure for ${BOLD}$TARGET_SERVICE${NC} (interactive profile selector)...${NC}"
+      echo -e "${BLUE}▶ Starting infrastructure (interactive — set INFRA_PROFILES in $TARGET_SERVICE/.env to skip this)...${NC}"
       "$BIN" up
     fi
     echo -e "\n${BLUE}▶ Verifying infrastructure health...${NC}"
@@ -141,18 +162,19 @@ case "$ACTION" in
     "$BIN" down
     ;;
   restart)
-    if [ -n "$*" ]; then
-      PROFILES="$*"
-      echo -e "${BLUE}⟳ Restarting infrastructure (Profiles: $PROFILES)...${NC}"
+    PROFILES=$(resolve_profiles "$@")
+    if [ -n "$PROFILES" ]; then
+      echo -e "${BLUE}⟳ Restarting infrastructure (Profiles: ${BOLD}$PROFILES${NC})...${NC}"
       # shellcheck disable=SC2086
       "$BIN" restart $PROFILES
     else
-      echo -e "${BLUE}⟳ Restarting infrastructure (interactive)...${NC}"
+      echo -e "${BLUE}⟳ Restarting infrastructure (interactive — set INFRA_PROFILES in $TARGET_SERVICE/.env to skip this)...${NC}"
       "$BIN" restart
     fi
     "$BIN" health
     verify_services
     ;;
+
   status|ps)
     "$BIN" status
     ;;
