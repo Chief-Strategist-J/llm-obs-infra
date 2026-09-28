@@ -41,9 +41,9 @@ services:
       - "-c"
       - "config_file=/etc/postgresql/postgresql.conf"
     volumes:
-      - ../../config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro
-      - ../../config/alloydb/security-audit.sql:/docker-entrypoint-initdb.d/10-security-audit.sql:ro
-      - ../../config/alloydb/init-extensions.sql:/docker-entrypoint-initdb.d/20-init-extensions.sql:ro
+      - ../../packages/platform-orchestrator/config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ../../packages/platform-orchestrator/config/alloydb/security-audit.sql:/docker-entrypoint-initdb.d/10-security-audit.sql:ro
+      - ../../packages/platform-orchestrator/config/alloydb/init-extensions.sql:/docker-entrypoint-initdb.d/20-init-extensions.sql:ro
       - payment_db_data:/var/lib/postgresql/data
       - payment_db_archive:/var/lib/postgresql/archive
     networks:
@@ -150,7 +150,7 @@ services:
       - OTEL_SERVICE_NAME=payment-otel-collector
       - GOMEMLIMIT=858993459
     volumes:
-      - ../../config/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - ../../packages/platform-orchestrator/config/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
     ports:
       - "${PORT_PAYMENT_OTEL_HTTP:-4319}:4318"
       - "${PORT_PAYMENT_OTEL_GRPC:-4320}:4317"
@@ -179,7 +179,7 @@ services:
       - OTEL_SERVICE_NAME=payment-service-registry
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://payment-otel-collector:4318
     volumes:
-      - ../../config/service-registry:/etc/service-registry:ro
+      - ../../packages/platform-orchestrator/config/service-registry:/etc/service-registry:ro
     networks:
       llmobs-payment-network:
         aliases:

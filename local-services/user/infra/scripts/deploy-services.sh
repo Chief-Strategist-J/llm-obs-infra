@@ -67,8 +67,8 @@ elif [ -f "$SERVICE_DIR/.env.example" ]; then
   gcloud compute scp "$SERVICE_DIR/.env.example" "${TARGET_INSTANCE}:${REMOTE_DIR}/.env" --zone="$ZONE" --project="$PROJECT_ID"
 fi
 
-if [ -d "$ROOT_DIR/config" ]; then
-  gcloud compute scp --recurse "$ROOT_DIR/config" "${TARGET_INSTANCE}:${REMOTE_DIR}/config/" --zone="$ZONE" --project="$PROJECT_ID" || true
+if [ -d "$ROOT_DIR/packages/platform-orchestrator/config" ]; then
+  gcloud compute scp --recurse "$ROOT_DIR/packages/platform-orchestrator/config" "${TARGET_INSTANCE}:${REMOTE_DIR}/config/" --zone="$ZONE" --project="$PROJECT_ID" || true
 fi
 
 echo "Deploying ${SERVICE_NAME} service stack on $TARGET_INSTANCE..."

@@ -48,8 +48,8 @@ services:
       - "${PORT_TRAEFIK_HTTPS:-31419}:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./config/traefik/dynamic.yml:/etc/traefik/dynamic/dynamic.yml:ro
-      - ./config/certs:/etc/traefik/certs:ro
+      - ./packages/platform-orchestrator/config/traefik/dynamic.yml:/etc/traefik/dynamic/dynamic.yml:ro
+      - ./packages/platform-orchestrator/config/certs:/etc/traefik/certs:ro
     environment:
       - DOCKER_API_VERSION=1.40
       - OTEL_SERVICE_NAME=llmobs-traefik-gateway
@@ -82,7 +82,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://llmobs-otel-collector:4318
     stop_grace_period: 30s
     volumes:
-      - ./config/redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./packages/platform-orchestrator/config/redis/redis.conf:/etc/redis/redis.conf:ro
       - redis_data:/data
     networks:
       - llmobs-network
@@ -128,7 +128,7 @@ services:
       - OTEL_SERVICE_NAME=llmobs-kafka-broker
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://llmobs-otel-collector:4318
     volumes:
-      - ./config/kafka/server.properties:/etc/kafka/server.properties:ro
+      - ./packages/platform-orchestrator/config/kafka/server.properties:/etc/kafka/server.properties:ro
       - kafka_data:/var/lib/kafka/data
     networks:
       - llmobs-network
@@ -166,8 +166,8 @@ services:
       OTEL_SERVICE_NAME: llmobs-clickhouse-analytics
       OTEL_EXPORTER_OTLP_ENDPOINT: http://llmobs-otel-collector:4318
     volumes:
-      - ./config/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
-      - ./config/clickhouse/users.d:/etc/clickhouse-server/users.d
+      - ./packages/platform-orchestrator/config/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+      - ./packages/platform-orchestrator/config/clickhouse/users.d:/etc/clickhouse-server/users.d
       - clickhouse_data:/var/lib/clickhouse
     networks:
       - llmobs-network
@@ -195,7 +195,7 @@ services:
       - OTEL_SERVICE_NAME=llmobs-tempo-tracing
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://llmobs-otel-collector:4318
     volumes:
-      - ./config/tempo/tempo-config.yaml:/etc/tempo/tempo-config.yaml:ro
+      - ./packages/platform-orchestrator/config/tempo/tempo-config.yaml:/etc/tempo/tempo-config.yaml:ro
       - tempo_data:/var/tempo
     ports:
       - "${PORT_TEMPO:-31416}:3200"
@@ -227,8 +227,8 @@ services:
       - OTEL_SERVICE_NAME=llmobs-otel-collector
       - GOMEMLIMIT=858993459
     volumes:
-      - ./config/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
-      - ./config/certs:/etc/otel-collector/certs:ro
+      - ./packages/platform-orchestrator/config/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - ./packages/platform-orchestrator/config/certs:/etc/otel-collector/certs:ro
     ports:
       - "${PORT_OTEL_HTTP:-31417}:4318"
       - "${PORT_OTEL_GRPC:-31418}:4317"
@@ -278,7 +278,7 @@ services:
       - OTEL_SERVICE_NAME=llmobs-grafana-portal
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://llmobs-otel-collector:4318
     volumes:
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./packages/platform-orchestrator/config/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
     networks:
       - llmobs-network
@@ -338,9 +338,9 @@ services:
       - "-c"
       - "config_file=/etc/postgresql/postgresql.conf"
     volumes:
-      - ./config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro
-      - ./config/alloydb/security-audit.sql:/docker-entrypoint-initdb.d/10-security-audit.sql:ro
-      - ./config/alloydb/init-extensions.sql:/docker-entrypoint-initdb.d/20-init-extensions.sql:ro
+      - ./packages/platform-orchestrator/config/alloydb/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./packages/platform-orchestrator/config/alloydb/security-audit.sql:/docker-entrypoint-initdb.d/10-security-audit.sql:ro
+      - ./packages/platform-orchestrator/config/alloydb/init-extensions.sql:/docker-entrypoint-initdb.d/20-init-extensions.sql:ro
       - alloydb_data:/var/lib/postgresql/data
       - alloydb_archive:/var/lib/postgresql/archive
     networks:
@@ -385,7 +385,7 @@ services:
       - "traefik.http.routers.temporal.middlewares=security-headers@file,rate-limit@file"
       - "traefik.http.services.temporal.loadbalancer.server.port=8080"
     volumes:
-      - ./config/temporal/temporal.yaml:/etc/temporal/config/temporal.yaml:ro
+      - ./packages/platform-orchestrator/config/temporal/temporal.yaml:/etc/temporal/config/temporal.yaml:ro
     depends_on:
       llmobs-alloydb:
         condition: service_started
@@ -422,8 +422,8 @@ services:
       - OTEL_SERVICE_NAME=llmobs-service-registry
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://llmobs-otel-collector:4318
     volumes:
-      - ./config/service-registry:/etc/service-registry:ro
-      - ./config/traefik/dynamic:/etc/traefik/dynamic
+      - ./packages/platform-orchestrator/config/service-registry:/etc/service-registry:ro
+      - ./packages/platform-orchestrator/config/traefik/dynamic:/etc/traefik/dynamic
     networks:
       - llmobs-network
     healthcheck:
