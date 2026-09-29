@@ -256,7 +256,57 @@ Manage alert rules and notification channels (Slack, Webhooks, Email, PagerDuty)
 
 ---
 
-### 11. REST API Daemon (`server`)
+### 11. Traefik Ingress Gateway (`traefik`)
+
+```bash
+# Test Traefik gateway availability & latency
+./bin/llmobs traefik ping
+
+# Overview of active routers, services, and middlewares
+./bin/llmobs traefik overview
+
+# List active network entrypoints
+./bin/llmobs traefik entrypoints
+
+# List, register, and delete HTTP dynamic routing rules
+./bin/llmobs traefik router list
+./bin/llmobs traefik router get app-router
+./bin/llmobs traefik router add custom-app --rule "Host(\`custom.llmobs.local\`)" --service "custom-svc"
+./bin/llmobs traefik router delete custom-app
+
+# List backend load balancer services & middlewares
+./bin/llmobs traefik services
+./bin/llmobs traefik middlewares
+
+# List and configure TCP routing rules
+./bin/llmobs traefik tcp list
+./bin/llmobs traefik tcp add custom-tcp --rule "HostSNI(\`custom.llmobs.local\`)" --service "custom-tcp-svc"
+```
+
+---
+
+### 12. DNS Discovery & `/etc/hosts` Sync (`dns`)
+
+```bash
+# List discovered platform domain records & sync status
+./bin/llmobs dns list
+
+# Safely synchronize platform domains into /etc/hosts within demarcated blocks
+sudo ./bin/llmobs dns sync
+./bin/llmobs dns sync --dry-run
+sudo ./bin/llmobs dns sync --ip 127.0.0.1 --domains custom.local
+
+# Check live domain resolution latency & reachability
+./bin/llmobs dns check
+./bin/llmobs dns check grafana.llmobs.local
+
+# Discover routing domains from active configurations
+./bin/llmobs dns discover
+```
+
+---
+
+### 13. REST API Daemon (`server`)
 
 ```bash
 # Start API daemon on port 31427
@@ -270,6 +320,8 @@ REST API routes follow standard JSON envelope formatting (`meta`, `data`, `error
 - `/api/v1/grafana/datasources` — Dynamic Grafana datasources
 - `/api/v1/grafana/dashboards` — Dynamic Grafana dashboards
 - `/api/v1/grafana/alerts` & `/api/v1/grafana/contact-points` — Unified alerting
+- `/api/v1/traefik/*` — Traefik ingress routers, services, middlewares, and overview
+- `/api/v1/dns/*` — DNS records, atomic hosts sync, and resolution checks
 - `/api/v1/config` — Resource limit management
 - `/api/v1/gdpr/erasure` — GDPR data erasure
 
