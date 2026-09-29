@@ -7,3 +7,6 @@
 [submodule "packages/platform-orchestrator"]
 	path = packages/platform-orchestrator
 	url = https://github.com/Chief-Strategist-J/platform-orchestrator.git
+[submodule "packages/k8s-platform-orchestrator"]
+	path = packages/k8s-platform-orchestrator
+	url = https://github.com/Chief-Strategist-J/k8s-platform-orchestrator.git
