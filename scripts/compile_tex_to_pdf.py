@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-LaTeX to PDF Compiler via Docker (blang/latex:latest)
+LaTeX to PDF Bulk Compiler & Auxiliary File Cleaner via Docker (blang/latex:latest)
 
 Compiles LaTeX documents (.tex) into publication-ready PDFs using a containerized
-pdflatex environment. Performs two compilation passes to accurately resolve
-tables of contents, cross-references, and auxiliary artifacts.
+pdflatex environment with automatic two-pass reference resolution and automated
+auxiliary file (.aux, .log, .out, .toc, etc.) cleanup.
 """
 
 from __future__ import annotations
@@ -14,17 +14,24 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
-
+from typing import List, Optional, Set
 
 DEFAULT_DOCKER_IMAGE = "blang/latex:latest"
+AUX_EXTENSIONS: Set[str] = {
+    ".aux",
+    ".log",
+    ".out",
+    ".toc",
+    ".nav",
+    ".snm",
+    ".vrb",
+    ".fls",
+    ".fdb_latexmk",
+    ".synctex.gz",
+}
 
 
 def find_workspace_root(start_path: Path) -> Path:
-    """
-    Find the closest repository root containing .git, pyproject.toml, or package.json.
-    Defaults to parent directory if no marker is found.
-    """
     current = start_path.resolve()
     for parent in [current] + list(current.parents):
         if (parent / ".git").exists() or (parent / ".gitmodules").exists() or (parent / "pyproject.toml").exists():
@@ -32,139 +39,138 @@ def find_workspace_root(start_path: Path) -> Path:
     return start_path.parent.resolve()
 
 
-def compile_tex_file(
-    tex_path: Path,
+def clean_auxiliary_files(directory: Path, stem: Optional[str] = None) -> List[Path]:
+    deleted: List[Path] = []
+    if not directory.exists() or not directory.is_dir():
+        return deleted
+
+    for item in directory.iterdir():
+        if item.is_file() and item.suffix.lower() in AUX_EXTENSIONS:
+            if stem is None or item.stem == stem:
+                try:
+                    item.unlink()
+                    deleted.append(item)
+                except OSError as e:
+                    print(f"⚠️ Warning: Could not delete {item}: {e}", file=sys.stderr)
+
+    return deleted
+
+
+def discover_tex_files(search_dir: Path) -> List[Path]:
+    return sorted([p for p in search_dir.rglob("*.tex") if not p.name.startswith(".")])
+
+
+def compile_tex_files_bulk(
+    tex_files: List[Path],
     docker_image: str = DEFAULT_DOCKER_IMAGE,
-    clean_aux: bool = False,
+    clean_aux: bool = True,
     verbose: bool = False,
-) -> bool:
-    """
-    Compile a single .tex file into .pdf using Docker.
+) -> int:
+    if not tex_files:
+        print("⚠️ No .tex files provided for compilation.")
+        return 0
 
-    Parameters
-    ----------
-    tex_path : Path
-        Absolute or relative path to the .tex file.
-    docker_image : str, default="blang/latex:latest"
-        Docker image tag containing pdflatex.
-    clean_aux : bool, default=False
-        Whether to delete auxiliary files (.aux, .log, .out, .toc) after compilation.
-    verbose : bool, default=False
-        Whether to print full pdflatex stdout.
+    workspace_root = find_workspace_root(Path.cwd())
+    print(f"\n========================================================")
+    print(f"🚀 LaTeX Bulk Compiler: {len(tex_files)} file(s) found")
+    print(f"🐳 Docker Image: {docker_image}")
+    print(f"📂 Mount Point: {workspace_root} -> /workdir")
+    print(f"🧹 Auto-Clean Auxiliary Files: {clean_aux}")
+    print(f"========================================================\n")
 
-    Returns
-    -------
-    bool
-        True if PDF was successfully produced, False otherwise.
-    """
-    resolved_path = tex_path.resolve()
-    if not resolved_path.exists():
-        print(f"❌ Error: File not found: {resolved_path}", file=sys.stderr)
-        return False
+    if clean_aux:
+        for tex_path in tex_files:
+            clean_auxiliary_files(tex_path.parent, tex_path.stem)
 
-    if resolved_path.suffix != ".tex":
-        print(f"❌ Error: Expected a .tex file, got: {resolved_path.name}", file=sys.stderr)
-        return False
+    success_count = 0
+    failure_count = 0
 
-    target_dir = resolved_path.parent
-    tex_filename = resolved_path.name
-    pdf_filename = resolved_path.stem + ".pdf"
-    expected_pdf = target_dir / pdf_filename
+    commands: List[str] = []
+    for tex_path in tex_files:
+        resolved = tex_path.resolve()
+        target_dir = resolved.parent
+        try:
+            rel_dir = target_dir.relative_to(workspace_root).as_posix()
+            container_dir = f"/workdir/{rel_dir}"
+        except ValueError:
+            container_dir = "/workdir"
 
-    # Determine workspace root for volume mount
-    workspace_root = find_workspace_root(target_dir)
+        tex_name = resolved.name
+        pdf_name = resolved.stem + ".pdf"
 
-    try:
-        rel_working_dir = target_dir.relative_to(workspace_root)
-        container_workdir = f"/workdir/{rel_working_dir.as_posix()}"
-    except ValueError:
-        workspace_root = target_dir
-        container_workdir = "/workdir"
+        cmd = (
+            f"cd {container_dir} && "
+            f"echo '📄 Compiling {tex_name}...' && "
+            f"pdflatex -interaction=nonstopmode {tex_name} > /dev/null 2>&1 && "
+            f"pdflatex -interaction=nonstopmode {tex_name} > /dev/null 2>&1 && "
+            f"echo '✅ Done: {pdf_name}'"
+        )
+        commands.append(cmd)
 
-    print(f"\n📄 Compiling LaTeX: {resolved_path.relative_to(workspace_root) if workspace_root in resolved_path.parents else resolved_path}")
-    print(f"   🐳 Docker Image: {docker_image}")
-    print(f"   📂 Mount Point: {workspace_root} -> /workdir")
-    print(f"   📍 Container Workdir: {container_workdir}")
+    full_bash_script = " && ".join(commands)
 
-    # Two-pass pdflatex command: Pass 1 builds aux/toc/citations, Pass 2 resolves references
-    docker_cmd: List[str] = [
+    docker_cmd = [
         "docker",
         "run",
         "--rm",
         "-v",
         f"{workspace_root}:/workdir",
-        "-w",
-        container_workdir,
         docker_image,
         "bash",
         "-c",
-        (
-            f"pdflatex -interaction=nonstopmode {tex_filename} && "
-            f"pdflatex -interaction=nonstopmode {tex_filename}"
-        ),
+        full_bash_script,
     ]
 
     try:
-        result = subprocess.run(
+        proc = subprocess.run(
             docker_cmd,
-            capture_output=True,
+            capture_output=not verbose,
             text=True,
             check=False,
         )
 
-        if verbose:
-            print("\n--- pdflatex Output ---")
-            print(result.stdout)
-            if result.stderr:
-                print(result.stderr, file=sys.stderr)
-            print("-----------------------\n")
-
-        if expected_pdf.exists() and expected_pdf.stat().st_size > 0:
-            print(f"✅ PDF compiled successfully: {expected_pdf} ({expected_pdf.stat().st_size} bytes)")
-
-            if clean_aux:
-                aux_extensions = [".aux", ".log", ".out", ".toc", ".nav", ".snm", ".vrb", ".fls", ".fdb_latexmk"]
-                cleaned = []
-                for ext in aux_extensions:
-                    aux_file = target_dir / (resolved_path.stem + ext)
-                    if aux_file.exists():
-                        aux_file.unlink()
-                        cleaned.append(ext)
-                if cleaned:
-                    print(f"🧹 Cleaned auxiliary files: {', '.join(cleaned)}")
-
-            return True
-        else:
-            print(f"❌ PDF generation failed for {tex_filename}. Exit code: {result.returncode}", file=sys.stderr)
-            if not verbose:
-                # Print trailing lines of stdout for error diagnosis
-                stdout_lines = result.stdout.splitlines()[-25:]
-                print("\nLast 25 lines of compiler output:", file=sys.stderr)
-                print("\n".join(stdout_lines), file=sys.stderr)
-            return False
+        if verbose and proc.stdout:
+            print(proc.stdout)
+        if verbose and proc.stderr:
+            print(proc.stderr, file=sys.stderr)
 
     except FileNotFoundError:
-        print("❌ Error: Docker executable not found in system PATH. Ensure Docker daemon is installed and running.", file=sys.stderr)
-        return False
+        print("❌ Error: Docker executable not found. Ensure Docker is installed and running.", file=sys.stderr)
+        return len(tex_files)
     except Exception as e:
-        print(f"❌ Unexpected compilation error: {e}", file=sys.stderr)
-        return False
+        print(f"❌ Error during Docker execution: {e}", file=sys.stderr)
 
+    for tex_path in tex_files:
+        resolved = tex_path.resolve()
+        pdf_path = resolved.parent / (resolved.stem + ".pdf")
+        if pdf_path.exists() and pdf_path.stat().st_size > 0:
+            print(f"✅ Successfully compiled: {pdf_path.relative_to(workspace_root) if workspace_root in pdf_path.parents else pdf_path} ({pdf_path.stat().st_size} bytes)")
+            success_count += 1
+        else:
+            print(f"❌ Failed to produce PDF: {pdf_path.name}", file=sys.stderr)
+            failure_count += 1
 
-def discover_tex_files(search_dir: Path) -> List[Path]:
-    """Recursively discover all .tex files in a directory."""
-    return sorted([p for p in search_dir.rglob("*.tex") if not p.name.startswith(".")])
+        if clean_aux:
+            cleaned = clean_auxiliary_files(resolved.parent, resolved.stem)
+            if cleaned:
+                print(f"   🧹 Removed {len(cleaned)} auxiliary files (.aux, .log, .out, etc.)")
+
+    print(f"\n========================================================")
+    print(f"📊 Summary: {success_count} succeeded, {failure_count} failed out of {len(tex_files)} total.")
+    print(f"========================================================\n")
+
+    return failure_count
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Compile LaTeX (.tex) files to PDF using Docker (blang/latex:latest)."
+        description="Compile LaTeX (.tex) files to publication-ready PDFs in bulk and clean auxiliary files."
     )
     parser.add_argument(
         "targets",
         nargs="*",
         type=str,
-        help="Path(s) to .tex file(s) or directory to compile.",
+        help="Path(s) to .tex file(s) or directories to compile.",
     )
     parser.add_argument(
         "--all",
@@ -177,15 +183,20 @@ def main() -> int:
         help="Search and compile all .tex files in the specified directory.",
     )
     parser.add_argument(
+        "--clean-only",
+        action="store_true",
+        help="Only delete auxiliary files (.aux, .log, .out, .toc, etc.) without compiling.",
+    )
+    parser.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="Keep auxiliary files after compilation (disabled by default).",
+    )
+    parser.add_argument(
         "--image",
         type=str,
         default=DEFAULT_DOCKER_IMAGE,
         help=f"Docker LaTeX image (default: {DEFAULT_DOCKER_IMAGE}).",
-    )
-    parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="Clean up auxiliary files (.aux, .log, .out, .toc) after successful compilation.",
     )
     parser.add_argument(
         "-v",
@@ -195,18 +206,18 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+    repo_root = find_workspace_root(Path.cwd())
 
     files_to_compile: List[Path] = []
 
-    if args.all:
-        repo_root = find_workspace_root(Path.cwd())
+    if args.all or (not args.targets and not args.dir):
         files_to_compile.extend(discover_tex_files(repo_root))
     elif args.dir:
-        target_directory = Path(args.dir).resolve()
-        if not target_directory.is_dir():
-            print(f"❌ Error: Not a valid directory: {target_directory}", file=sys.stderr)
+        target_dir = Path(args.dir).resolve()
+        if not target_dir.is_dir():
+            print(f"❌ Error: Invalid directory: {target_dir}", file=sys.stderr)
             return 1
-        files_to_compile.extend(discover_tex_files(target_directory))
+        files_to_compile.extend(discover_tex_files(target_dir))
     elif args.targets:
         for t in args.targets:
             p = Path(t).resolve()
@@ -216,41 +227,28 @@ def main() -> int:
                 files_to_compile.append(p)
             else:
                 print(f"⚠️ Warning: Skipping invalid target: {t}", file=sys.stderr)
-    else:
-        # Default: compile math.tex in the current working directory if present
-        local_tex = Path.cwd() / "math.tex"
-        if local_tex.exists():
-            files_to_compile.append(local_tex)
-        else:
-            parser.print_help()
-            return 1
 
     if not files_to_compile:
-        print("⚠️ No .tex files found to compile.")
+        print("⚠️ No .tex files found.")
         return 0
 
-    print(f"📋 Found {len(files_to_compile)} LaTeX file(s) to compile.")
+    if args.clean_only:
+        total_cleaned = 0
+        for tex_file in files_to_compile:
+            cleaned = clean_auxiliary_files(tex_file.parent, tex_file.stem)
+            total_cleaned += len(cleaned)
+        print(f"🧹 Clean-only complete: Removed {total_cleaned} auxiliary file(s).")
+        return 0
 
-    success_count = 0
-    failure_count = 0
+    clean_aux = not args.no_clean
+    failures = compile_tex_files_bulk(
+        tex_files=files_to_compile,
+        docker_image=args.image,
+        clean_aux=clean_aux,
+        verbose=args.verbose,
+    )
 
-    for tex_file in files_to_compile:
-        success = compile_tex_file(
-            tex_path=tex_file,
-            docker_image=args.image,
-            clean_aux=args.clean,
-            verbose=args.verbose,
-        )
-        if success:
-            success_count += 1
-        else:
-            failure_count += 1
-
-    print(f"\n========================================")
-    print(f"📊 Summary: {success_count} succeeded, {failure_count} failed out of {len(files_to_compile)} total.")
-    print(f"========================================")
-
-    return 0 if failure_count == 0 else 1
+    return 0 if failures == 0 else 1
 
 
 if __name__ == "__main__":
