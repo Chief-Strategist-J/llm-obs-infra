@@ -107,7 +107,7 @@ def compile_tex_files_bulk(
         )
         commands.append(cmd)
 
-    full_bash_script = " && ".join(commands)
+    full_bash_script = "; ".join(commands)
 
     docker_cmd = [
         "docker",
